@@ -77,6 +77,7 @@ struct note {
   int mult;
   int octave;
   char pitch;
+  int tuplenotes;
   int y;
   int base_exp;
   int base;
@@ -89,6 +90,10 @@ struct note {
   struct fract len;
   float stemlength;
 };
+
+struct dynamic {
+  char color;
+  };
 
 /* elemental unit of a voice list */
 /* item points to a note, bar-line or other feature */

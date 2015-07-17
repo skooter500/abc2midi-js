@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
  *
  */
 
@@ -23,6 +23,11 @@
 /* part of YAPS - abc to PostScript converter */
 /* This file contains routines to calculate symbol positions within */
 /* a line of music. */
+
+/* for Microsoft Visual C++ 6.0 and higher */
+#ifdef _MSC_VER
+#define ANSILIBS
+#endif
 
 #include <stdio.h>
 #ifdef ANSILIBS
@@ -46,6 +51,16 @@ int n, m;
   reducef(f);
 }
 
+static void mulfract(f, n, m)
+struct fract* f;
+int n, m;
+/* multiply  n/m to fraction pointed to by f */
+/* like addunits(), but does not use unitlength */
+{
+  f->num =   n*f->num;
+  f->denom = m*f->denom;
+  reducef(f);
+}
 
 static void advance(struct voice* v, int phase, int* items, double* itemspace, double x)
 /* move on one symbol in the specified voice */
@@ -53,6 +68,7 @@ static void advance(struct voice* v, int phase, int* items, double* itemspace, d
   struct feature* p;
   struct rest* arest;
   struct note* anote;
+  struct fract tuplefactor, notelen;
   int done;
   int stepon;
   int zerotime, newline;
@@ -84,7 +100,7 @@ static void advance(struct voice* v, int phase, int* items, double* itemspace, d
   };
   done = 0;
   while ((p != NULL) && (done==0)) {
-    p->x = x + p->xleft;
+    p->x = (float) (x + p->xleft);
     stepon = 1;
     switch(p->type) {
     case MUSICLINE:
@@ -121,6 +137,7 @@ static void advance(struct voice* v, int phase, int* items, double* itemspace, d
       break;
     case REST:
     case NOTE:
+      tuplefactor = v->tuplefactor;
       if ((zerotime==1) && (!v->ingrace)) {
         done = 1;
         stepon = 0;
@@ -136,7 +153,17 @@ static void advance(struct voice* v, int phase, int* items, double* itemspace, d
         };
         if ((p->type == NOTE) && (!v->ingrace)) {
           anote = p->item;
-          addfract(&v->time, anote->len.num, anote->len.denom);
+	  notelen = anote->len;
+
+ 	 if (anote->tuplenotes >0) {
+		  mulfract(&notelen,tuplefactor.num,tuplefactor.denom);
+	           }
+
+
+          addfract(&v->time, notelen.num, notelen.denom);
+/*	  printf("%c %d/%d %d/%d\n",anote->pitch,notelen.num,notelen.denom,
+			  v->time.num,v->time.denom);
+*/
         };
       };
       break;
@@ -411,7 +438,7 @@ static int spaceline(struct voice* v)
       inmusic = 0;
       break;
     case CHORDNOTE:
-      p->x = lastx;
+      p->x = (float) lastx;
       break;
     case CLEF:
     case KEY:
@@ -431,7 +458,7 @@ static int spaceline(struct voice* v)
     case REST:
     case NOTE:
       x = x + p->xleft;
-      p->x = x;
+      p->x = (float) x;
       lastx = x;
       x = x + p->xright + gap;
       break;

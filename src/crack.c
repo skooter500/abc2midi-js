@@ -63,6 +63,7 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 
 /* define USE_INDEX if your C libraries have index() instead of strchr() */
 #ifdef USE_INDEX

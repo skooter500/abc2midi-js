@@ -8,17 +8,21 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #ifdef ANSILIBS
 #include <ctype.h>
 #endif
 #include "midifile.h"
+
+void initfuncs();
+void midifile();
 
 static FILE *F;
 int SECONDS;      /* global that tells whether to display seconds or ticks */
 int division;        /* from the file header */
 long tempo = 500000; /* the default tempo is 120 beats/minute */
 
-filegetc()
+int filegetc()
 {
   return(getc(F));
 }
@@ -26,7 +30,7 @@ filegetc()
 /* for crack */
 extern int arg_index;
 
-main(argc,argv)
+int main(argc,argv)
 char **argv;
 {
   FILE *efopen();
@@ -67,7 +71,7 @@ char *mode;
   return(f);
 }
 
-error(s)
+void error(s)
 char *s;
 {
   fprintf(stderr,"Error: %s\n",s);
@@ -81,86 +85,86 @@ prtime()
   printf("Time=%ld  ",Mf_currtime);
 }
 
-txt_header(format,ntrks,ldivision)
+void txt_header(format,ntrks,ldivision)
 {
         division = ldivision; 
   printf("Header format=%d ntrks=%d division=%d\n",format,ntrks,division);
 }
 
-txt_trackstart()
+void txt_trackstart()
 {
   printf("Track start\n");
 }
 
-txt_trackend()
+void txt_trackend()
 {
   printf("Track end\n");
 }
 
-txt_noteon(chan,pitch,vol)
+void txt_noteon(chan,pitch,vol)
 {
   prtime();
   printf("Note on, chan=%d pitch=%d vol=%d\n",chan+1,pitch,vol);
 }
 
-txt_noteoff(chan,pitch,vol)
+void txt_noteoff(chan,pitch,vol)
 {
   prtime();
   printf("Note off, chan=%d pitch=%d vol=%d\n",chan+1,pitch,vol);
 }
 
-txt_pressure(chan,pitch,press)
+void txt_pressure(chan,pitch,press)
 {
   prtime();
   printf("Pressure, chan=%d pitch=%d press=%d\n",chan+1,pitch,press);
 }
 
-txt_parameter(chan,control,value)
+void txt_parameter(chan,control,value)
 {
   prtime();
   printf("Parameter, chan=%d c1=%d c2=%d\n",chan+1,control,value);
 }
 
-txt_pitchbend(chan,msb,lsb)
+void txt_pitchbend(chan,msb,lsb)
 {
   prtime();
   printf("Pitchbend, chan=%d msb=%d lsb=%d\n",chan+1,msb,lsb);
 }
 
-txt_program(chan,program)
+void txt_program(chan,program)
 {
   prtime();
   printf("Program, chan=%d program=%d\n",chan+1,program);
 }
 
-txt_chanpressure(chan,press)
+void txt_chanpressure(chan,press)
 {
   prtime();
   printf("Channel pressure, chan=%d pressure=%d\n",chan+1,press);
 }
 
-txt_sysex(leng,mess)
+void txt_sysex(leng,mess)
 char *mess;
 {
   prtime();
   printf("Sysex, leng=%d\n",leng);
 }
 
-txt_metamisc(type,leng,mess)
+void txt_metamisc(type,leng,mess)
 char *mess;
 {
   prtime();
   printf("Meta event, unrecognized, type=0x%02x leng=%d\n",type,leng);
 }
 
-txt_metaspecial(type,leng,mess)
+void txt_metaspecial(type,leng,mess)
 char *mess;
 {
   prtime();
   printf("Meta event, sequencer-specific, type=0x%02x leng=%d\n",type,leng);
 }
 
-txt_metatext(type,leng,mess)
+void txt_metatext(type,leng,mess)
 char *mess;
 {
   static char *ttype[] = {
@@ -190,25 +194,25 @@ char *mess;
   printf(">\n");
 }
 
-txt_metaseq(num)
+void txt_metaseq(num)
 {
   prtime();
   printf("Meta event, sequence number = %d\n",num);
 }
 
-txt_metaeot()
+void txt_metaeot()
 {
   prtime();
   printf("Meta event, end of track\n");
 }
 
-txt_keysig(sf,mi)
+void txt_keysig(sf,mi)
 {
   prtime();
   printf("Key signature, sharp/flats=%d  minor=%d\n",sf,mi);
 }
 
-txt_tempo(ltempo)
+void txt_tempo(ltempo)
 long ltempo;
 {
   tempo = ltempo;
@@ -216,7 +220,7 @@ long ltempo;
   printf("Tempo, microseconds-per-MIDI-quarter-note=%ld\n",tempo);
 }
 
-txt_timesig(nn,dd,cc,bb)
+void txt_timesig(nn,dd,cc,bb)
 {
   int denom = 1;
   while ( dd-- > 0 )
@@ -226,21 +230,21 @@ txt_timesig(nn,dd,cc,bb)
     nn,denom,cc,bb);
 }
 
-txt_smpte(hr,mn,se,fr,ff)
+void txt_smpte(hr,mn,se,fr,ff)
 {
   prtime();
   printf("SMPTE, hour=%d minute=%d second=%d frame=%d fract-frame=%d\n",
     hr,mn,se,fr,ff);
 }
 
-txt_arbitrary(leng,mess)
+void txt_arbitrary(leng,mess)
 char *mess;
 {
   prtime();
   printf("Arbitrary bytes, leng=%d\n",leng);
 }
 
-initfuncs()
+void initfuncs()
 {
   Mf_error = error;
   Mf_header =  txt_header;

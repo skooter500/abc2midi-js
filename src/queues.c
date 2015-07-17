@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
  *
  */
 
@@ -33,9 +33,11 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include "queues.h"
 #include "abc.h"
 #include "genmidi.h"
+#include "midifile.h"
 
 /* queue for notes waiting to end */
 /* allows us to do general polyphony */
@@ -44,15 +46,36 @@ struct Qitem {
   int delay;
   int pitch;
   int chan;
+  int effect;  /* [SS] 2012-12-11 */
   int next;
 };
 struct Qitem Q[QSIZE+1];
 int Qhead, freehead, freetail;
+extern int totalnotedelay; /* from genmidi.c [SS] */
+extern int notedelay;      /* from genmidi.c [SS] */
+extern int bendvelocity;   /* from genmidi.c [SS] */
+extern int bendacceleration; /* from genmidi.c [SS] */
+extern int bendstate; /* from genmidi.c [SS] */
+/* [SS] 2014-09-10 */
+extern int benddata[50]; /* from genmidi.c [SS] 2014-09-10 */
+extern int bendnvals;
+
 
 /* routines to handle note queue */
 
-void addtoQ(num, denom, pitch, chan, d)
+/* genmidi.c communicates with queues.c mainly through the    */
+/* functions addtoQ and timestep. The complexity comes in the */
+/* handling of chords. When another note in a chord is passed,*/
+/* addtoQ detemines whether other notes in the Q structure    */
+/* overlap in time with this chord and modifies the delay item*/
+/* of the note which finish later so that it is relative to the*/
+/* end of the earlier note. Normally all notes in the chord end*/
+/* at the same as specifiedy abc standard, so the delay of the*/
+/* other notes cached in the Q structure should be set to zero.*/
+
+void addtoQ(num, denom, pitch, chan, effect, d)
 int num, denom, pitch, chan, d;
+int effect; /* [SS] 2012-12-11 */
 {
   int i, done;
   int wait;
@@ -70,6 +93,7 @@ int num, denom, pitch, chan, d;
   };
   Q[i].pitch = pitch;
   Q[i].chan = chan;
+  Q[i].effect = effect;  /* [SS] 2012-12-11 */
   /* find place in queue */
   ptr = &Qhead;
   done = 0;
@@ -81,7 +105,8 @@ int num, denom, pitch, chan, d;
       done = 1;
     } else {
       if (Q[*ptr].delay > wait) {
-        Q[*ptr].delay = Q[*ptr].delay - wait;
+        Q[*ptr].delay = Q[*ptr].delay - wait -notedelay;
+        if (Q[*ptr].delay < 0) Q[*ptr].delay = 0;
         Q[i].next = *ptr;
         Q[i].delay = wait;
         *ptr = i;
@@ -133,6 +158,7 @@ void clearQ()
     event_error("Sustained notes beyond end of track");
     timestep(Q[Qhead].delay+1, 1);
   };
+timestep(25,0); /* to avoid transient artefacts at end of track */
 }
 
 void printQ()
@@ -228,6 +254,106 @@ void Qcheck()
   };
 }
 
+
+/* [SS] 2012-12-11 */
+void note_effect() {
+  int delta8;
+  int pitchbend;
+  char data[2];
+  int i;
+  int velocity;
+  delta8 = delta_time/8;
+  pitchbend = bendstate;  /* [SS] 2014-09-09 */
+  velocity = bendvelocity;
+  for (i=0;i<8;i++) {
+     pitchbend = pitchbend + velocity;
+     velocity = velocity + bendacceleration;
+     if (pitchbend > 16383) pitchbend = 16383;
+     if (pitchbend < 0) pitchbend = 0;
+ 
+     data[0] = (char) (pitchbend&0x7f);
+     data[1] = (char) ((pitchbend>>7)&0x7f);
+     mf_write_midi_event(delta8,pitch_wheel,Q[Qhead].chan,data,2);
+     delta_time -= delta8;
+     }
+  midi_noteoff(delta_time, Q[Qhead].pitch, Q[Qhead].chan);
+  pitchbend = bendstate; /* [SS] 2014-09-22 */
+  data[0] = (char) (pitchbend&0x7f);
+  data[1] = (char) ((pitchbend>>7)&0x7f);
+  mf_write_midi_event(delta_time,pitch_wheel,Q[Qhead].chan,data,2);
+  }
+
+/* [SS] 2014-09-11 */
+void note_effect2() {
+  int delta;
+  int pitchbend;
+  char data[2];
+  int i;
+  delta = delta_time/bendnvals;
+  pitchbend = bendstate;  /* [SS] 2014-09-09 */
+  for (i=0;i<bendnvals;i++) {
+     pitchbend = pitchbend + benddata[i];
+     if (pitchbend > 16383) pitchbend = 16383;
+     if (pitchbend < 0) pitchbend = 0;
+ 
+     data[0] = (char) (pitchbend&0x7f);
+     data[1] = (char) ((pitchbend>>7)&0x7f);
+     if (i == 0) /* [SS] 2014-09-24 */
+       mf_write_midi_event(0,pitch_wheel,Q[Qhead].chan,data,2);
+     else {
+       mf_write_midi_event(delta,pitch_wheel,Q[Qhead].chan,data,2);
+       delta_time -= delta;
+       }
+     }
+  midi_noteoff(delta_time, Q[Qhead].pitch, Q[Qhead].chan);
+  delta_time = 0; /* [SS] 2014-09-24 */
+  pitchbend = bendstate; /* [SS] 2014-09-09 */
+  data[0] = (char) (pitchbend&0x7f);
+  data[1] = (char) ((pitchbend>>7)&0x7f);
+  mf_write_midi_event(delta_time,pitch_wheel,Q[Qhead].chan,data,2);
+  }
+
+/* [SS] 2014-09-22 */
+void note_effect3() {
+  int delta;
+  int pitchbend;
+  char data[2];
+  delta =0;
+  pitchbend = bendstate; 
+  pitchbend = pitchbend + benddata[0];
+  if (pitchbend > 16383) pitchbend = 16383;
+  if (pitchbend < 0) pitchbend = 0;
+  data[0] = (char) (pitchbend&0x7f);
+  data[1] = (char) ((pitchbend>>7)&0x7f);
+  mf_write_midi_event(delta,pitch_wheel,Q[Qhead].chan,data,2);
+  midi_noteoff(delta_time, Q[Qhead].pitch, Q[Qhead].chan);
+  pitchbend = bendstate;
+  data[0] = (char) (pitchbend&0x7f);
+  data[1] = (char) ((pitchbend>>7)&0x7f);
+  mf_write_midi_event(delta,pitch_wheel,Q[Qhead].chan,data,2); /* [SS] 2014-09-23 */
+  } 
+
+
+
+
+/* timestep is called by delay() in genmidi.c typically at the */
+/* end of a note, chord or rest. It is also called by clearQ in*/
+/* this file. Timestep, is not only responsible for sending the*/
+/* midi_noteoff command for any expired notes in the Q structure*/
+/* but also maintains the delta_time global variable which is  */
+/* shared with genmidi.c. Timestep also calls advanceQ() in   */
+/* this file which updates all the delay variables for the items */
+/* in the Q structure to reflect the current MIDI time. Timestep */
+/* also calls removefromQ in this file which cleans out expired */
+/* notes from the Q structure. To make things even more complicated*/
+/* timestep runs the dogchords and the dodrums for bass/chordal */
+/* and drum accompaniments by calling the function progress_sequence.*/
+/* Dogchords and dodrums may also call addtoQ changing the contents*/
+/* of the Q structure array. The tracklen variable in MIDI time */
+/* units is also maintained here.                               */ 
+
+/* new: delta_time_track0 is declared in queues.h like delta_time */
+
 void timestep(t, atend)
 int t;
 int atend;
@@ -240,6 +366,7 @@ int atend;
   while ((Qhead != -1) && (Q[Qhead].delay < time)) {
     headtime = Q[Qhead].delay;
     delta_time = delta_time + (long) headtime;
+    delta_time_track0 = delta_time_track0 + (long) headtime; /* [SS] 2010-06-27*/
     time = time - headtime;
     advanceQ(headtime);
     if (Q[Qhead].pitch == -1) {
@@ -247,14 +374,34 @@ int atend;
         progress_sequence(Q[Qhead].chan);
       };
     } else {
-      midi_noteoff(delta_time, Q[Qhead].pitch, Q[Qhead].chan);
-      tracklen = tracklen + delta_time;
-      delta_time = 0L;
-    };
+       if (Q[Qhead].effect == 0) {
+          midi_noteoff(delta_time, Q[Qhead].pitch, Q[Qhead].chan);
+          tracklen = tracklen + delta_time;
+          delta_time = 0L;}
+       else {
+          tracklen = tracklen + delta_time; /* [SS] 2015-06-08 */
+          switch (Q[Qhead].effect) { /* [SS] 2014-09-22 */
+             case 1:
+                note_effect();
+                break;
+   
+             case 2:
+                note_effect2();
+                break;
+
+             case 3:
+                note_effect3();
+                break;
+           } 
+          delta_time = 0L;}
+       };
+
     removefromQ(Qhead);
   };
   if (Qhead != -1) {
     advanceQ(time);
   };
-  delta_time = delta_time + (long)time;
+  delta_time = delta_time + (long)time - totalnotedelay;
+  delta_time_track0 = delta_time_track0 + (long)time - totalnotedelay; /* [SS] 2010-06-27*/
 }
+

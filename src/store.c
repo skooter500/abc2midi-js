@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
  *
  */
 
@@ -29,7 +29,178 @@
  *
  * Macintosh Port 30th July 1996
  * Wil Macaulay (wil@syndesis.com)
+
+
+Table of Contents
+
+struct voicecontext
+struct notestruct
+
+struct voicecontext* newvoice()
+struct voicecontext* getvoicecontext()
+void meter_voice_update()
+void dump_voicecontexts()
+void dump_trackdescriptor()
+void setup_trackstructure()
+void clearvoicecontexts()
+int getchordnumbers()
+void addchordname()
+void setup_chordnames()
+void event_init()
+void event_text()
+void event_x_reserved()
+void event_abbreviation()
+void event_acciaccatura()
+int locate_voice()
+void sync_voice()
+int search_backwards_for_last_bar_line ()
+void event_start_extended_overlay()
+void event_stop_extended_overlay()
+void event_split_voice()
+void recurse_back_to_original_voice()
+void recurse_back_and_change_bar()
+void complete_all_split_voices()
+void event_tex()
+void event_fatal_error()
+void event_error()
+void event_warning()
+int autoextend()
+int textextend()
+void addfeature()
+void replacefeature()
+void insertfeature()
+void removefeature()
+void removefeatures()
+void event_linebreak()
+void event_startmusicline()
+void event_endmusicline()
+void textfeature()
+void event_comment()
+void parse_mididefs()
+char * expand_midix()
+void event_specific()
+void event_specific_in_header()
+void event_startinline()
+void event_closeinline()
+void extract_filename()
+void extract_field()
+void event_words()
+void append_words()
+void appendfield()
+void checkbreak()
+void char_out()
+void read_spec()
+void event_part()
+void event_voice()
+void event_length()
+void tempounits()
+int get_tempo_from_name()
+void event_tempo()
+void event_timesig()
+void event_octave()
+void event_info_key()
+void stack_broken()
+void restore_broken()
+void event_graceon()
+void event_graceoff()
+void event_playonrep()
+void event_sluron()
+void event_sluroff()
+void event_tie()
+void event_space()
+void event_lineend()
+void event_broken()
+void event_tuple()
+void event_chord()
+void lenmul()
+void brokenadjust()
+void marknotestart()
+void marknoteend()
+void marknote()
+void event_rest()
+void event_mrest()
+void event_chordon()
+void event_chordoff()
+void event_finger()
+int pitchof()
+int barepitch()
+int pitchof_b()
+int p48tc53()
+void convert_to_comma53()
+void doroll()
+void doroll_setup()
+void doroll_output()
+void dotrill()
+void dotrill_setup()
+void dotrill_output()
+void dump_notestruct()
+void free_notestructs()
+void makecut()
+void makeharproll()
+void makeharproll3()
+void doornament()
+void hornp()
+void event_note()
+void event_microtone()
+void event_normal_tone()
+void event_handle_gchord()
+void event_handle_instruction()
+void setmap()
+void altermap()
+void copymap()
+int mputc()
+void addfract()
+void nondestructive_readstr()
+void dotie()
+void fix_enclosed_note_lengths()
+int patchup_chordtie()
+void tiefix()
+void applygrace()
+void applygrace_orig()
+void applygrace_new()
+void dograce()
+void zerobar()
+void event_bar()
+void placeendrep()
+void placestartrep()
+void fixreps()
+void beat_modifier()
+void apply_bf_stress_factors()
+void startfile()
+void headerprocess()
+void event_key()
+void scan_for_missing_repeats()
+void add_missing_repeats()
+void convert_tnote_to_note()
+void expand_ornaments()
+void fix_part_start()
+void finishfile()
+void event_blankline()
+void event_refno()
+void event_eof()
+int main()
+
+
+
  */
+
+#define VERSION "3.64 July 15 2015 abc2midi" 
+
+/* enables reading V: indication in header */
+#define XTEN1 1
+/*#define INFO_OCTAVE_DISABLED 1*/
+
+/* for Microsoft Visual C++ 6.0 and higher */
+#ifdef _MSC_VER
+#define ANSILIBS
+#define strcasecmp stricmp
+#define _CRT_SECURE_NO_WARNINGS
+#endif
+
+
+#ifdef _MSC_VER
+#define snprintf _snprintf_s
+#endif
 
 #include "abc.h"
 #include "parseabc.h"
@@ -37,6 +208,7 @@
 #include "midifile.h"
 #include "genmidi.h"
 #include <stdio.h>
+#include <math.h>
 
 #ifdef __MWERKS__
 #define __MACINTOSH__ 1
@@ -59,6 +231,8 @@ int setOutFileCreator(char *fileName,unsigned long theType,
 extern char* strchr();
 extern void reduce();
 #endif
+/*int snprintf(char *str, size_t size, const char *format, ...);*/
+void load_stress_parameters(char *);
 
 #define MAXLINE 500
 #define INITTEXTS 20
@@ -68,6 +242,14 @@ extern void reduce();
 /* global variables grouped roughly by function */
 
 FILE *fp;
+
+/*#define MAKAM*/
+#ifdef MAKAM
+FILE *fc53; /* for debugging */
+#endif
+
+programname fileprogram = ABC2MIDI;
+extern int oldchordconvention; /* for handling +..+ chords */
 
 /* parsing stage */
 int tuplecount, tfact_num, tfact_denom, tnote_num, tnote_denom;
@@ -79,33 +261,113 @@ int hornpipe, last_num, last_denom;
 int timesigset;
 int retain_accidentals;
 int ratio_a, ratio_b;
+int velocitychange = 15;
+int chordstart=0;
+int nopropagate_accidentals = 0;
+/* microtonal support and scale temperament */
+int active_pitchbend;
+extern struct fraction setmicrotone; /* [SS] 2014-01-07 */
+extern int microtone;
+int temperament = 0;
+#define SEMISIZE 4096
+int octave_size = 12*SEMISIZE;
+int fifth_size = 7*SEMISIZE; /* default to 12-edo */
+int sharp_size = SEMISIZE; /* [HL] 2015-05-15] */
+int started_parsing=0;
+int v1index= -1;
+int ignore_fermata = 0; /* [SS] 2010-01-06 */
+int ignore_gracenotes = 0; /* [SS] 2010-01-08 */
+int separate_tracks_for_words = 0; /* [SS] 2010-02-02 */
+int bodystarted =0;
+int harpmode=0;  /* [JS] 2011-04-29 */
+int easyabcmode = 1; /* [SS] 2011-07-18 */
+int barflymode = 1; /* [SS] 2011-08-19 */
+char rhythmdesignator[32]; /* [SS] 2011-08-19 */
+int retuning = 0; /* [SS] 2012-04-01 */
+int bend = 8192; /* [SS] 2012-04-01 */
+int comma53 = 0; /* [SS] 2014-01-12 */
+int silent = 0; /* [SS] 2014-10-16 */
+int no_more_free_channels; /* [SS] 2015-03-23 */
+void init_p48toc53 (); /* [SS] 2014-01-12 */ 
+void convert_to_comma53 (char acc, int *midipitch, int* midibend);  
+void recurse_back_to_original_voice (); /* [SS] 2014-03-26 */
+
 
 struct voicecontext {
+/* not to be confused with struct voice defined in struct.h and
+   used only by yaps.
+*/
   /* maps of accidentals for each stave line */
-  char basemap[7], workmap[7];
-  int  basemul[7], workmul[7];
+  char basemap[7], workmap[7][10];
+  int  basemul[7], workmul[7][10];
+  struct fraction basemic[7],workmic[7][10];
+  int  keyset; /* flag to indicate whether key signature set */
   int default_length;
-  int voiceno;
-  int indexno;
+  int active_meter_num; /* [SS] 2012-11-08 */
+  int active_meter_denom; /* [SS] 2012-11-08 */
+  int voiceno; /* voice number referenced by V: command. To avoid
+                  conflicts with split voices, all split voices
+                  begin from 32. */
+  int indexno; /* voice index number in the feat array. It just
+                  increments by one and depends on the order the
+                  voices are created -- including split voices.
+               */
+  int topvoiceno,topindexno; /* links to original voice in the split */
   int hasgchords;
   int haswords;
+  int hasdrums;
+  int hasdrone;
   int inslur;
   int ingrace;
   int octaveshift;
+  int lastbarloc;  /* position of last bar line parsed */
+  int tosplitno,fromsplitno; /* links to split voices and source voice*/ 
+  int last_resync_point;
   /* chord handling */
   int inchord, chordcount;
   int chord_num, chord_denom;
   /* details of last 2 notes/chords to apply length-modifiers to */
-  int laststart, lastend, thisstart, thisend;
-  /* broken rythm handling */
+  int laststart, lastend, thisstart, thisend; /* for handling broken rhythms*/
+  /* broken rhythm handling */
   int brokentype, brokenmult, brokenpending;
   int broken_stack[7];
+  int midichannel; /* [SS] 2015-03-24 */
   struct voicecontext* next;
+  int drumchannel;
 };
 struct voicecontext global;
 struct voicecontext* v;
 struct voicecontext* head;
+struct voicecontext* vaddr[64]; /* address of all voices (by v->indexno) */
+/* vaddr is only a convenience for debugging */
+
+
+/* [SS] 2012-06-30 */
+/* structure for expanding a note into a TRILL, ROLL, or ORNAMENT */
+struct notestruct {
+  int note;
+  int index;
+  int notetype;
+  int pitch;
+  int pitchup;
+  int bendup;
+  int benddown;
+  int pitchdown;
+  int default_length;
+  };
+
+struct notestruct* noteaddr[1000];
+int notesdefined = 1;
+
+
+
+struct trackstruct trackdescriptor[40]; /* trackstruct defined in genmidi.h*/
+ 
+
+int dependent_voice[64]; /* flag to indicate type of voice */
 int voicecount;
+int numsplits=0;
+int splitdepth = 0;
 
 /* storage structure for strings */
 int maxtexts = INITTEXTS;
@@ -114,14 +376,20 @@ int ntexts = 0;
 
 /* Named guitar chords */
 char chordname[MAXCHORDNAMES][8];
-int chordnotes[MAXCHORDNAMES][6];
+/* int chordnotes[MAXCHORDNAMES][6]; */
+int chordnotes[MAXCHORDNAMES][10]; /* [SS] 2012-01-29 */
 int chordlen[MAXCHORDNAMES];
 int chordsnamed = 0;
 
 /* general purpose storage structure */
 int maxnotes;
 int *pitch, *num, *denom;
+int *bentpitch; /* needed for handling microtones */
 featuretype *feature;
+int *stressvelocity;  /* [SS] 2011-08-17 for Phil's stress model*/
+int *pitchline; /* introduced for handling ties */
+int *decotype; /* [SS] 2012-06-29 for handling ROLLS, TRILLS, etc. */
+int *charloc; /* [SS] 2014-12-25 for storing character position in abc tune */
 int notes;
 
 int verbose = 0;
@@ -130,8 +398,13 @@ int got_titlename;
 int namelimit;
 int xmatch;
 int sf, mi;
-int gchordvoice, wordvoice, drumvoice;
-int gchordtrack, drumtrack;
+int gchordvoice, wordvoice, drumvoice, dronevoice;
+int ratio_standard = -1; /* flag corresponding to -RS parameter */
+/* when ratio_standard != -1 the ratio for a>b is 3:1 instead of 2:1 */
+int quiet = -1; /* if not -1 many common warnings and error messages */
+                /* are suppressed.                                   */
+int fermata_fixed = 0; /* flag on how to process fermata */
+int apply_fermata_to_chord = 0; /* [SS] 2012-03-26 */
 
 /* Part handling */
 struct vstring part;
@@ -148,12 +421,26 @@ int tempo_num, tempo_denom;
 int relative_tempo, Qtempo;
 extern int division;
 extern int div_factor;
+int default_tempo = 120; /* quarter notes per minutes */
+
+/* for get_tempo_from_name  [SS] 2010-12-07 */
+char *temponame[19] = {"larghissimo" , "adagissimo", "lentissimo",
+   "largo", "adagio", "lento", "larghetto", "adagietto", "andante",
+   "andantino", "moderato", "allegretto", "allegro", "vivace",
+   "vivo", "presto", "allegrissimo", "vivacissimo", "prestissimo"};
+int temporate[19] = {40,            44,             48,
+    56,      59,       62,       66,        76,        88,
+    96,          104,       112,          120,       168,
+   180,     192,      208,            220,          240}; 
+
 
 /* output file generation */
 int userfilename = 0;
 char *outname = NULL;
 char *outbase = NULL;
 int check;
+int nofnop; /* for suppressing dynamics (ff, pp etc) */
+int nocom;  /* for suppressing comments in MIDI file */
 int ntracks;
 
 /* bar length checking */
@@ -162,49 +449,121 @@ int barchecking;
 
 /* generating MIDI output */
 int middle_c;
-extern int channels[MAXCHANS + 3];
-extern int global_transpose;
+extern int channel_in_use[MAXCHANS + 3]; /* 2015-03-16 formerly channels[] */
 extern int additive;
-int gfact_num, gfact_denom;
+int gfact_num, gfact_denom, gfact_method;  /* for handling grace notes */
 
 /* karaoke handling */
 int karaoke, wcount;
 char** words;
 int maxwords = INITWORDS;
 
+extern int decorators_passback[DECSIZE]; /* a kludge for passing
+information from the event_handle_instruction to parsenote
+in parseabc.c */
+
+
+extern int inchordflag; /* [SS] 2012-03-30 */
+/* for reseting decorators_passback in parseabc.c */
+
+/* time signature after header processed */
+int header_time_num,header_time_denom;
+
+int dummydecorator[DECSIZE]; /* used in event_chord */
+extern char* featname[];
+
+char *csmfilename = NULL;  /* [SS] 2013-04-10 */
+
+/* [SS] 2015-06-01 */
+#define MAXMIDICMD 20 
+char midicmdname[MAXMIDICMD][32];
+char *midicmd[MAXMIDICMD];
+int nmidicmd = 0;
+
+
+void addfract(int *xnum, int *xdenom, int a, int b);
+static void zerobar();
+static void addfeature(int f,int p,int n,int d);
+static void replacefeature(int f, int p, int n, int d, int loc);
+void insertfeature(int f, int p, int n, int d, int loc);
+static void textfeature(int type, char *s);
 extern long writetrack();
+void init_drum_map();
+static void fix_enclosed_note_lengths(int from, int end);
+static int patchup_chordtie(int chordstart,int chordend);
+static void copymap(struct voicecontext* v);
+void init_stresspat();
+void beat_modifier(int);
+void readstressfile (char * filename);
+int parse_stress_params();
+void calculate_stress_parameters();
+extern int inbody; /* from parseabc.c [SS] 2009-12-18 */
+extern int lineposition; /* from parseabc.c [SS] 2011-07-18 */
+extern int beatmodel; /* from genmidi.c [SS] 2011-08-26 */
+int stressmodel;
+
+extern int nullputc();
+void dumpfeat (int from, int to); /* defined in genmidi.c */
+char * concatenatestring(char * s1,char * s2); /* defined in parseabc.c */
+void read_custom_stress_file (char *filename); /* defined in stresspat.c */
+
+
 
 static struct voicecontext* newvoice(n)
 /* allocate and initialize the data for a new voice */
 int n;
 {
   struct voicecontext *s;
-  int i;
+  int i,j;
 
   s = (struct voicecontext*) checkmalloc(sizeof(struct voicecontext));
   voicecount = voicecount + 1;
   s->voiceno = n;
   s->indexno = voicecount;
+  s->topvoiceno = n;
+  s->topindexno = voicecount;
   s->default_length = global.default_length;
+  s->active_meter_num = time_num;     /* [SS] 2012-11-08 */
+  s->active_meter_denom = time_denom; /* [SS] 2012-11-08 */
+  mtime_num = time_num;     /* [SS] 2012-11-08 */
+  mtime_denom = time_denom; /* [SS] 2012-11-08 */
   s->hasgchords = 0;
   s->haswords = 0;
+  s->hasdrums = 0;
+  s->hasdrone = 0;
   s->inslur = 0;
   s->ingrace = 0;
   s->inchord = 0;
   s->chordcount = 0;
+  s->lastbarloc = -1;
   s->laststart = -1;
   s->lastend = -1;
   s->thisstart = -1;
   s->thisend = -1;
   s->brokenpending = -1;
+  s->tosplitno = -1;
+  s->fromsplitno = -1;  
+  s->last_resync_point=0;
   s->next = NULL;
-  for (i=0; i<7; i++) {
-    s->basemap[i] = global.basemap[i];
-    s->basemul[i] = global.basemul[i];
-    s->workmap[i] = global.workmap[i];
-    s->workmul[i] = global.workmul[i];
-  };
+    for (i=0; i<7; i++) {
+      s->basemap[i] = global.basemap[i];
+      s->basemul[i] = global.basemul[i];
+      s->basemic[i].num = global.basemic[i].num; /* [SS] 2014-01-08 */
+      s->basemic[i].denom = global.basemic[i].denom;
+      for (j=0;j<10;j++) {
+        s->workmap[i][j] = global.workmap[i][j];
+        s->workmul[i][j] = global.workmul[i][j];
+        s->workmic[i][j].num =   global.workmic[i][j].num; /* [SS] 2014-01-26 */
+        s->workmic[i][j].denom = global.workmic[i][j].denom;
+        };
+    }
+  s->keyset = global.keyset;
   s->octaveshift = global.octaveshift;
+  s->drumchannel = 0;
+  s->midichannel = -1; /* [SS] 2015-03-24 */
+  if (voicecount < 0 || voicecount >63)
+     printf("illegal voicecount = %d\n",voicecount); /* [SS] 2012-11-25 */
+  vaddr[voicecount] = s;
   return(s);
 }
 
@@ -214,6 +573,7 @@ int n;
 {
   struct voicecontext *p;
   struct voicecontext *q;
+  int i,j;
 
   p = head;
   q = NULL;
@@ -230,8 +590,126 @@ int n;
   if (head == NULL) {
     head = p;
   };
+/* check that key signature mapping is set if global
+ * key signature set.                             */
+  if (p->keyset == 0 && global.keyset)
+    {
+    p->keyset = 1;
+    for (i=0; i<7; i++) {
+      p->basemap[i] = global.basemap[i];
+      p->basemul[i] = global.basemul[i];
+      for (j=0;j<10;j++) {
+        p->workmap[i][j] = global.workmap[i][j];
+        p->workmul[i][j] = global.workmul[i][j];
+        }
+      };
+    }
+  mtime_num = p->active_meter_num; /* [SS] 2012-11-08 */
+  mtime_denom = p->active_meter_denom; /* [SS] 2012-11-08 */
   return(p);
 }
+
+/* [SS] 2015-03-11 */
+void meter_voice_update (int n,int m)
+/* for all defined voices update p->active_meter_num and
+   p->active_meter_denom
+*/
+{
+struct voicecontext *p;
+p = head;
+while (p != NULL) {
+   p->active_meter_num = n;
+   p->active_meter_denom = m;
+   p = p->next;
+   }
+}
+
+
+void dump_voicecontexts() {
+/* called while debugging */
+  struct voicecontext *p;
+  struct voicecontext *q;
+
+  p = head;
+  printf("dump_voicecontexts()\n");
+  while (p != NULL) {
+    printf("num %d index %d gchords %d words %d drums %d drone %d tosplit %d fromsplit %d\n",
+ p->voiceno,p->indexno,p->hasgchords,p->haswords,p->hasdrums,p->hasdrone,p->tosplitno,p->fromsplitno);
+    q = p->next;
+    p = q;
+  };
+}
+
+
+void dump_trackdescriptor() {
+ int i;
+ for (i=0;i<ntracks;i++) {
+    printf("%d %d %d\n",i,trackdescriptor[i].tracktype,trackdescriptor[i].voicenum);
+ }
+}
+
+
+void setup_trackstructure () {
+  struct voicecontext *p;
+  struct voicecontext *q;
+
+
+  trackdescriptor[0].tracktype=NOTES;
+  trackdescriptor[0].voicenum=1;
+  trackdescriptor[0].midichannel = -1;
+
+  p = head;
+  ntracks = 1;
+  while (p != NULL) {
+    if (verbose) {
+    printf("num %d index %d gchords %d words %d drums %d drone %d tosplit %d fromsplit %d\n",
+ p->voiceno,p->indexno,p->hasgchords,p->haswords,p->hasdrums,p->hasdrone,p->tosplitno,p->fromsplitno);}
+    if (ntracks > 39) event_fatal_error("Too many tracks"); /* [SS] 2015-03-26 */
+    trackdescriptor[ntracks].tracktype = NOTES;
+    trackdescriptor[ntracks].voicenum = p->indexno;
+    trackdescriptor[ntracks].midichannel = p->midichannel;
+    if (p->haswords) {
+       if (!separate_tracks_for_words) {
+       trackdescriptor[ntracks].tracktype = NOTEWORDS;
+       trackdescriptor[ntracks].voicenum = p->indexno;
+       } else {
+       ntracks++;
+       trackdescriptor[ntracks].tracktype = WORDS;
+       trackdescriptor[ntracks].voicenum = trackdescriptor[ntracks-1].voicenum;
+       }
+    }
+    if (p->hasgchords) {
+       ntracks++;
+       trackdescriptor[ntracks].tracktype = GCHORDS;
+       trackdescriptor[ntracks].voicenum = p->indexno;
+       }
+    if (p->hasdrums) {
+        ntracks++;  
+        trackdescriptor[ntracks].tracktype = DRUMS;
+        trackdescriptor[ntracks].voicenum = p->indexno;
+      };
+    if (p->hasdrone) {
+        ntracks++;  
+        trackdescriptor[ntracks].tracktype = DRONE;
+        trackdescriptor[ntracks].voicenum = p->indexno;
+      };
+    ntracks++;
+    q = p->next;
+    p = q;
+    }
+
+/* does the tune need any gchord, drum, drone or word track */
+    if ((voicesused == 0) && (!karaoke) && (gchordvoice == 0) && 
+        (drumvoice == 0) && (dronevoice==0)) {
+      ntracks = 1;
+      } 
+
+/*dump_trackdescriptor();*/
+}
+
+
+
+
 
 static void clearvoicecontexts()
 /* free up all the memory allocated to voices */
@@ -247,6 +725,8 @@ static void clearvoicecontexts()
   };
   head = NULL;
 }
+
+
 
 static int getchordnumber(s)
 /* looks through list of known chords for chord name given in s */
@@ -279,8 +759,8 @@ int len;
     event_error("Chord name cannot exceed 7 characters");
     return;
   };  
-  if (len > 6) {
-    event_error("Named chord cannot have more than 6 notes");
+  if (len > 10) {
+    event_error("Named chord cannot have more than 10 notes");
     return;
   };
   i = 0;
@@ -318,6 +798,7 @@ static void setup_chordnames()
   static int list_m[3] = {0, 3, 7};
   static int list_7[4] = {0, 4, 7, 10};
   static int list_m7[4] = {0, 3, 7, 10};
+  static int list_m7b5[4] = {0, 3, 6, 10};
   static int list_maj7[4] = {0, 4, 7, 11};
   static int list_M7[4] = {0, 4, 7, 11};
   static int list_6[4] = {0, 4, 7, 9};
@@ -334,6 +815,7 @@ static void setup_chordnames()
   static int list_11[6] = {0, 4, 7, 10, 2, 5};
   static int list_dim9[5] = {0, 4, 7, 10, 13};
   static int list_sus[3] = {0, 5, 7};
+  static int list_sus4[3] = {0, 4, 7}; /* [SS] 2015-07-08 */
   static int list_sus9[3] = {0, 2, 7};
   static int list_7sus4[4] = {0, 5, 7, 10};
   static int list_7sus9[4] = {0, 2, 7, 10};
@@ -343,6 +825,7 @@ static void setup_chordnames()
   addchordname("m", 3, list_m);
   addchordname("7", 4, list_7);
   addchordname("m7", 4, list_m7);
+  addchordname("m7b5", 4, list_m7b5);
   addchordname("maj7", 4, list_maj7);
   addchordname("M7", 4, list_M7);
   addchordname("6", 4, list_6);
@@ -359,6 +842,7 @@ static void setup_chordnames()
   addchordname("11", 6, list_11);
   addchordname("dim9", 5, list_dim9);
   addchordname("sus", 3, list_sus);
+  addchordname("sus4", 3, list_sus4); /* [SS] 2015-07-08 */
   addchordname("sus9", 3, list_sus9);
   addchordname("7sus4", 4, list_7sus4);
   addchordname("7sus9", 4, list_7sus9);
@@ -367,11 +851,13 @@ static void setup_chordnames()
 
 void event_init(argc, argv, filename)
 /* this routine is called first by parseabc.c */
-int argc;
 char* argv[];
 char **filename;
 {
   int j;
+  int arg,m,n;
+  float afreq,semitone_shift; /* [SS] 2012-04-01 */
+  double log10();
 
   /* look for code checking option */
   if (getarg("-c", argc, argv) != -1) {
@@ -387,31 +873,147 @@ char **filename;
     namelimit = 8;
   };
   /* look for verbose option */
-  if (getarg("-v", argc, argv) != -1) {
-    verbose = 1;
-  } else {
+  arg = getarg("-v", argc, argv);
+  if (arg != -1) {  /* [SS] 2011-08-26 */
+    if (argc > arg) {
+      n = sscanf(argv[arg],"%d",&m);
+      if (n > 0) verbose = m; }
+      else verbose = 1; /* arg != -1 but arg == argc */
+    } else {  /* arg =  -1 */
     verbose = 0;
   };
+  if (getarg("-ver",argc, argv) != -1) {
+     printf("abc2midi %s\n",VERSION);
+     exit(0);
+  }
+/* look for "no forte no piano" option */
+  if (getarg("-NFNP", argc, argv) != -1) {
+    nofnop = 1;
+  } else {
+    nofnop = 0;
+  }
+
+  if (getarg("-NFER",argc, argv) != -1) {
+     ignore_fermata = 1;
+  } else {
+     ignore_fermata = 0;
+    }
+
+  if (getarg("-NGRA",argc, argv) != -1) {
+     ignore_gracenotes = 1;
+  } else {
+     ignore_gracenotes = 0;
+    }
+
+  
+  if (getarg("-NCOM", argc, argv) != -1) {
+    nocom = 1;
+  } else {
+    nocom = 0;
+  }
+
+  if (getarg("-STFW",argc,argv) != -1) {
+    separate_tracks_for_words = 1;
+  } else {
+    separate_tracks_for_words = 0;
+    }
+
+  if (getarg("-HARP",argc,argv) != -1) {  /* [JS] 2011-04-29 */
+    harpmode = 1;
+  } else {
+    harpmode = 0;
+    }
+
+  if (getarg("-EA",argc,argv) != -1) { /* [SS] 2011-07-18 */
+    easyabcmode = 1;
+  } else {
+    easyabcmode = 0;
+  }
+
+  arg = getarg("-BF",argc,argv);
+  if (arg != -1)  {  /* [SS] 2011-08-26 */
+    barflymode = 1;
+    if (argc > arg) {
+      n = sscanf(argv[arg],"%d",&m);
+      if (n > 0) stressmodel = m;
+      } else stressmodel = 2;
+    } else {
+    barflymode = 0;
+    stressmodel = 0;
+  }
+
+  arg = getarg("-TT",argc,argv); /* [SS] 2012-04-01 */
+  if (arg != -1) {
+    n =0;
+    if (argc > arg) {
+       n = sscanf(argv[arg],"%f",&afreq);
+       }
+    if (n < 1) {printf("expecting float between 415.30 and 466.16 after -TT\n");
+               } else {
+               retuning = 1;
+               semitone_shift = (float) 12.0 * log10(afreq/440.0f)/log10(2.0f);
+               printf("afreq = %f semitone_shift = %f\n",afreq,semitone_shift);         
+               if (semitone_shift >= 1.001) {printf("frequency %f must be less than 466.16\n",afreq);
+                   retuning = 0;
+                  }
+               if (semitone_shift <= -1.015) {printf("frequency %f must be greater than 415.0\n",afreq);
+                  retuning = 0;
+                  }             
+               if (retuning) {bend = (int) (8192.0 * semitone_shift) + 8192;
+                              if (bend > 16383) bend=16383;
+                              if (bend < 0) bend = 0;
+                              printf("bend = %d\n",bend);
+                              }
+               }
+    } 
+
+  if (getarg("-OCC",argc,argv) != -1) oldchordconvention=1;
+  if (getarg("-silent",argc,argv) != -1) silent = 1; /* [SS] 2014-10-16 */
+
   maxnotes = 500;
   /* allocate space for notes */
   pitch = checkmalloc(maxnotes*sizeof(int));
   num = checkmalloc(maxnotes*sizeof(int));
   denom = checkmalloc(maxnotes*sizeof(int));
+  stressvelocity = checkmalloc(maxnotes*sizeof(int)); /* [SS] 2011-08-17 */
+  bentpitch = checkmalloc(maxnotes*sizeof(int));
+  decotype  = checkmalloc(maxnotes*sizeof(int)); /* [SS] 2012-06-29 */
   feature = (featuretype*) checkmalloc(maxnotes*sizeof(featuretype));
+  pitchline = checkmalloc(maxnotes*sizeof(int));
+  charloc = checkmalloc(maxnotes*sizeof(int)); /* [SS] 2014-12-25 */
+  for (j=0; j<maxnotes; j++)           /* [SS] 2012-11-25 */
+       bentpitch[j] = decotype[j] = 0; /* [SS] 2012-11-25 */
+  for (j=0;j<DECSIZE;j++)  dummydecorator[j] = 0;
+
   /* and for text */
   atext = (char**) checkmalloc(maxtexts*sizeof(char*));
   words = (char**) checkmalloc(maxwords*sizeof(char*));
   if ((getarg("-h", argc, argv) != -1) || (argc < 2)) {
-    printf("abc2midi version 1.24\n");
+    printf("abc2midi version %s\n",VERSION);
     printf("Usage : abc2midi <abc file> [reference number] [-c] [-v] ");
     printf("[-o filename]\n");
-    printf("        [-t] [-n <value>]\n");
+    printf("        [-t] [-n <value>] [-RS] [-NFNP] [-NCOM] [-NFER] [-NGRA] [-HARP]\n");
     printf("        [reference number] selects a tune\n");
     printf("        -c  selects checking only\n");
     printf("        -v  selects verbose option\n");
+    printf("        -ver prints version number and exits\n");
     printf("        -o <filename>  selects output filename\n");
     printf("        -t selects filenames derived from tune titles\n");
     printf("        -n <limit> set limit for length of filename stem\n");
+    printf("        -RS use 3:1 instead of 2:1 for broken rhythms\n");
+    printf("        -quiet suppress some common warnings\n");
+    printf("        -silent suppresses most messages\n");
+    printf("        -Q default tempo (quarter notes/minute)\n");
+    printf("        -NFNP don't process !p! or !f!-like fields\n");
+    printf("        -NCOM suppress comments in output MIDI file\n");
+    printf("        -NFER ignore all fermata markings\n");
+    printf("        -NGRA ignore grace notes\n");
+    printf("        -STFW separate tracks for words (lyrics)\n");
+    printf("        -HARP ornaments=roll for harpist (same pitch)\n"); /* [JS] 2011-04-29 */
+    printf("        -BF Barfly mode: invokes a stress model if possible\n");
+    printf("        -OCC old chord convention (eg. +CE+)\n");
+    printf("        -TT tune to A =  <frequency>\n");
+    printf("        -CSM <filename> load custom stress models from file\n");
     printf(" The default action is to write a MIDI file for each abc tune\n");
     printf(" with the filename <stem>N.mid, where <stem> is the filestem\n");
     printf(" of the abc file and N is the tune reference number. If the -o\n");
@@ -425,11 +1027,21 @@ char **filename;
       xmatch = readnumf(argv[2]);
     };
     *filename = argv[1];
-    outbase = addstring(argv[1]);
-    for (j = 0; j<strlen(outbase); j++) {
+/*    outbase = addstring(argv[1]); [RM] 2010-11-21 
+    for (j = 0; j< (int) strlen(outbase); j++) {
       if (outbase[j] == '.') outbase[j] = '\0';
     };
   };
+*/
+outbase = addstring(argv[1]); /* [RM] 2010-11-21 */
+ for (j = (int) strlen(outbase); j>0 ; j--)  {
+    if (outbase[j] == '.') {
+     outbase[j] = '\0';
+     break;
+    }
+  };
+ }
+
   /* look for filename stem limit */
   j = getarg("-n", argc, argv);
   if (j != -1) {
@@ -443,6 +1055,19 @@ char **filename;
       event_error("No number given, ignoring -n option");
     };
   };
+  /* look for default tempo */
+  j = getarg("-Q", argc,argv);
+  if (j != -1) {
+    if (argc >= j+1) {
+      sscanf(argv[j], "%d", &default_tempo);
+      if (default_tempo < 3) {
+        event_fatal_error("Q parameter is too small\nEnter -Q 240 not -Q 1/4=240");
+       };
+    } else {
+      event_error("No number given, ignoring -Q option");
+    };
+  };
+       
   /* look for user-supplied output filename */
   j = getarg("-o", argc, argv);
   if (j != -1) {
@@ -459,11 +1084,31 @@ char **filename;
     } else {
       event_error("No filename given, ignoring -o option");
     };
-  };
+  }
+
+/* [SS] 2013-04-10 */
+  j = getarg("-CSM", argc, argv);
+  if (j != -1) {
+    if (argc >= j+1) {
+      csmfilename = addstring(argv[j]);
+      if (*csmfilename == '-') {
+        event_error("csmfilename confused with options");
+        csmfilename = NULL;
+       }
+  } else {
+     event_error("Filename required after -CSM option");
+     } 
+ }
+
+  ratio_standard = getarg("-RS", argc, argv);
+  quiet  = getarg("-quiet", argc, argv);
   dotune = 0;
   parseroff();
   setup_chordnames();
+  
+  if (barflymode) init_stresspat();  /* [SS] 2011-08-18 */
 }
+
 
 void event_text(s)
 /* text found in abc file */
@@ -471,7 +1116,13 @@ char *s;
 {
   char msg[200];
 
-  sprintf(msg, "Ignoring text: %s", s);
+  /* to prevent possible buffer overflow in sprintf, which is */
+  /* a security risk,  we truncate s */
+#ifdef NO_SNPRINTF
+  sprintf(msg,  "Ignoring text: %s", s); /* SS 2005-01-09 */
+#else
+  snprintf(msg, sizeof(msg), "Ignoring text: %s", s); /* AL 2005-01-04 */
+#endif
   event_warning(msg);
 }
 
@@ -492,6 +1143,342 @@ char *string;
 char container;
 {
 }
+
+void event_acciaccatura()
+{
+/* does nothing here but outputs a / in abc2abc */
+return;
+}
+
+
+/* support functions for split voices */
+
+static int locate_voice(int start, int indexno)
+/* This function finds the beginning of voice:indexno
+   in the feature array. It starts looking from j = start
+*/
+{
+int j;
+j = start;
+while (j < notes) {
+   if (feature[j] == VOICE && pitch[j] == indexno) {
+       return j;
+       }
+  j++;
+  }
+return j;
+}
+
+static void sync_voice (struct voicecontext *vv, int sync_to, int ignorecurrentbar)
+{
+/* The function scans the contents of the feature[] array between,
+   the last resync point and sync_to (or end of the feature array)
+   depending on the ignorecurrentbar flag. It counts the time
+   of all notes and rests in the topvoice voice belonging to
+   voice vv and adds rests each time it encounters a bar line,
+   to synchronize this voice with its topvoice. It also copies
+   all repeat signs and dynamic markings in the topvoice and
+   inserts them in the current voice. 
+
+   This function is called by event_split_voice, complete_all_split_voices
+   and event_bar (if split voices are present).
+
+   The last_resync_point keeps track of what has been scanned,
+   so we only scan the topvoice once.
+
+*/
+int j;
+char *p;
+char command[40];
+int maxnotes,begin;
+char message[80];
+int snum,sdenom;
+int insidechord;
+int voiceno,indexno;
+voiceno = vv->topvoiceno;
+indexno = vv->topindexno;
+snum = 0;
+sdenom = 1;
+begin =0; /* to bypass double bar or single bar at beginning */
+/* we have already synced to last_resync_point so we continue
+   from here.
+*/
+j = vv->last_resync_point;
+if (voiceno != 1 || j>2)
+ j = locate_voice(j,indexno);
+else j++; /* bypass bar */
+if (ignorecurrentbar) maxnotes = sync_to;
+else maxnotes = notes-1; /*ignore last voice change */
+insidechord = 0;
+/*printf("syncing voice %d to %d from %d to %d \n",vv->indexno,indexno,j,maxnotes);*/
+while (j<=maxnotes) {
+/*  dumpfeat(j,j); */
+  switch (feature[j]) {
+    case VOICE:
+       if (pitch[j] != indexno) 
+          j = locate_voice(j,indexno);
+          break;
+       break;
+    case CHORDON:
+       insidechord = 1;
+       break;
+    case CHORDOFF:
+    case CHORDOFFEX:
+       insidechord = 0;
+       break;
+    case SINGLE_BAR:
+    case DOUBLE_BAR:
+    case BAR_REP:
+    case REP_BAR:
+    case DOUBLE_REP:
+       if (snum>0) {  /* bypass REST if no notes processed */
+         addfeature(REST,0,snum,sdenom);
+         /*printf("  added %d/%d to voice %d\n",snum,sdenom,vv->indexno);*/
+         snum = 0;
+         sdenom =1;
+         } 
+       addfeature(feature[j], 0, 0, denom[j]); /* copy feature */
+       break;
+    case PLAY_ON_REP:
+        if (feature[j-1] == SINGLE_BAR || feature[j-1] == REP_BAR
+           || feature[j-1] == VOICE) 
+              addfeature(feature[j],0,0,denom[j]);
+        else {
+            sprintf(message,"expecting SINGLE_BAR or REP_BAR preceding"
+            " PLAY_ON_REP instead found %s at %d\n",featname[feature[j-1]],j-1);
+            event_error(message);
+            }
+        break;
+    case DYNAMIC:
+       p = atext[pitch[j]];
+       skipspace(&p);
+       readstr(command, &p, 40);
+       if (strcmp(command, "program") == 0) {
+          textfeature(DYNAMIC, atext[pitch[j]]);
+         }
+       break;
+    case CHANNEL:
+       addfeature(feature[j], pitch[j], 0, 0); /* copy feature */
+       break;
+
+    case TIME:
+       addfeature(feature[j], pitch[j], num[j], denom[j]); /* copy feature */
+       break; /* [SS] 2008-07-17 */
+
+    case SETTRIM:
+       addfeature(feature[j], pitch[j], num[j], denom[j]); /* copy feature */
+       break; /* [SS] 2008-08-12 */
+
+    case GRACEON:	/*[SS] 2012-03-08 */
+       gracenotes = 1;
+       break;
+
+    case GRACEOFF:      /*[SS] 2012-03-08 */
+       gracenotes = 0;
+       break;
+
+    case NOTE:
+    case TNOTE:
+    case REST:
+       /*if (insidechord < 2) addfract(&snum,&sdenom,num[j],denom[j]);*/
+       if (insidechord < 2 && !gracenotes) addfract(&snum,&sdenom,num[j],denom[j]); /* [SS] 2012-03-08 */
+       if (insidechord) insidechord++;
+       begin = 1;
+       break;
+    default:
+       break;
+   }
+   j++;
+  }
+/* There are no more indexno notes between maxnotes and notes-1,
+   so set sync point at the end.
+*/
+vv->last_resync_point = notes-1;
+}
+
+
+int search_backwards_for_last_bar_line (int from)
+{
+int found,j;
+found = 0;
+j = from;
+while (!found && j>0)
+  {
+  if (feature[j] ==  SINGLE_BAR || 
+      feature[j] ==  DOUBLE_BAR ||
+      feature[j] ==  BAR_REP    || 
+      feature[j] ==  REP_BAR    ||
+      feature[j] ==  PLAY_ON_REP ||
+      feature[j] ==  DOUBLE_REP)  {found = 1; break;}
+      j--;
+  }
+return j;
+}
+
+/* [SS] 2015-03-23 */
+
+int extended_overlay_running = 0;
+
+void event_start_extended_overlay()
+{
+extended_overlay_running = notes;
+}
+
+void event_stop_extended_overlay()
+{
+extended_overlay_running = 0;
+/* [SS] 2015-03-26 */
+if (v->fromsplitno != -1 || splitdepth >0) recurse_back_to_original_voice();
+}
+
+
+/* When a split voice is encountered for the first time, we
+   must create a new voice and insert the proper delay (rests)
+   so that it remains in sync with the starting voice. If
+   the split voice already exists, we still sync it to the
+   source voice (there may have been intervening bars with
+   no splits) by adding rests. 
+*/
+
+int sync_to;
+
+void event_split_voice()
+{
+int splitno;
+int voiceno,indexno;
+int topvoiceno,topindexno;
+int program;
+int octaveshift;
+int default_length; /* [SS] 2010-08-28 */
+int abasemap[7],abasemul[7]; /* active basemap  [SS] 2013-10-30*/
+int midichannel; /* [SS] 2015-03-24 */
+int i;
+if (!voicesused) insertfeature(VOICE,1,0,0,v1index+1); /* [SS] 2009-12-21 */
+voicesused = 1; /* multivoice file */
+splitno = v->tosplitno;
+program = 0;
+
+/* a voice split in bar is just like a bar line */
+zerobar();
+v->lastbarloc = notes;  /* in case we need to change it */
+
+voiceno = v->voiceno;
+indexno = v->indexno;
+topvoiceno = v->topvoiceno;
+topindexno = v->topindexno;
+octaveshift = v->octaveshift;
+default_length = v->default_length; 
+midichannel = v->midichannel; /* [SS] 2015-03-24 */
+if (topvoiceno == voiceno) sync_to = search_backwards_for_last_bar_line(notes-1);
+addfeature(SINGLE_BAR,0,0,0);
+
+
+if (splitno == -1) {splitno = 32+numsplits++;
+                   v->tosplitno = splitno;
+                   }
+/* save basemap and basemul in case it was just changed. We
+   need to send it to the split voice. [SS] 2013-10-30
+*/
+for (i=0;i<7;i++) {
+     abasemap[i] = v->basemap[i];
+     abasemul[i] = v->basemul[i];
+     }
+
+v = getvoicecontext(splitno);
+/* propagate the active basemap to the split voice */
+for (i=0;i<7;i++) {
+     v->basemap[i] = abasemap[i];
+     v->basemul[i] = abasemul[i];
+     }
+copymap(v);
+/* end of [SS] 2013-10-30 patch */
+
+/* [SS] 2015-06-30 */
+/* need to propogate unit length */
+v->default_length = default_length;
+
+splitdepth++;
+addfeature(VOICE, v->indexno, 0, 0);
+if (v->fromsplitno == -1) {
+  v->fromsplitno = voiceno;
+  v->topvoiceno = topvoiceno;
+  v->topindexno = topindexno;
+  v->octaveshift = octaveshift;
+  v->default_length = default_length; /* [SS] 2010-08-28 */
+ }
+dependent_voice[v->indexno] = 1;
+/* when syncing the split voice we want to be sure that
+   we do not include the notes in the last bar in the source
+   voice the notes in the split voice take their place.
+*/
+v->midichannel = midichannel; /* [SS] 2014-03-24 */
+if (extended_overlay_running) 
+   sync_voice(v,extended_overlay_running,1);
+else
+   sync_voice (v,sync_to,1);
+}
+
+
+
+
+void recurse_back_to_original_voice ()
+{
+int previous_voice;
+previous_voice = v->fromsplitno;
+while (previous_voice >-1 && splitdepth > 0) {
+  v = getvoicecontext(previous_voice);
+  previous_voice = v->fromsplitno;
+  splitdepth--;
+  }
+addfeature(VOICE, v->indexno, 0, 0);
+copymap(v);
+}
+
+/* This function is not used any more [SS] 2013-12-02 */
+void recurse_back_and_change_bar (int type)
+{
+int previous_voice;
+previous_voice = v->fromsplitno;
+while (previous_voice >-1 && splitdepth > 0) {
+  v = getvoicecontext(previous_voice);
+/* [SS] 2013-12-1 */
+/*  if (v->lastbarloc > -1) replacefeature(type, 0,0,0, v->lastbarloc);*/
+  previous_voice = v->fromsplitno;
+  splitdepth--;
+  }
+addfeature(VOICE, v->indexno, 0, 0);
+copymap(v);
+/* [SS] 2013-12-1 */
+if (v->lastbarloc > -1) replacefeature(type, 0,0,0, v->lastbarloc);
+}
+
+
+static void
+complete_all_split_voices ()
+{
+int splitno;
+struct voicecontext *p;
+int voiceno,indexno;
+
+v = head;
+while (v != NULL) {
+    splitno = v->tosplitno;
+    if (splitno > -1) {
+      voiceno = v->voiceno;
+      indexno = v->indexno;
+      p = getvoicecontext(splitno);
+      addfeature(VOICE, p->indexno, 0, 0);
+      sync_voice (p,0,0);
+      /* complete fraction of bar */
+      if(bar_num >0) addfeature(REST, 0, 4*bar_num, bar_denom);
+      }
+    v = v->next;
+  };
+}
+
+/* end of code for split voices */
+
+
 
 void event_tex(s)
 /* TeX command found - ignore it */
@@ -515,10 +1502,10 @@ char *s;
   extern int nullpass;
 
   if (nullpass != 1) {
-    printf("Error in line %d : %s\n", lineno, s);
+    printf("Error in line-char %d-%d : %s\n", lineno,lineposition, s);
   };
 #else
-  printf("Error in line %d : %s\n", lineno, s);
+  printf("Error in line-char %d-%d : %s\n", lineno, lineposition, s);
 #endif
 }
 
@@ -530,10 +1517,10 @@ char *s;
   extern int nullpass;
 
   if (nullpass != 1) {
-    printf("Warning in line %d : %s\n", lineno, s);
+    printf("Warning in line-char %d-%d : %s\n", lineno,lineposition, s);
   };
 #else
-  printf("Warning in line %d : %s\n", lineno, s);
+  printf("Warning in line-char %d-%d : %s\n", lineno, lineposition, s);
 #endif
 }
 
@@ -542,11 +1529,11 @@ static int autoextend(maxnotes)
 int maxnotes;
 {
   int newlimit;
-  int *ptr;
+  int *ptr,*ptr2,*ptr3,*ptr4,*ptr5;
   featuretype *fptr;
   int i;
 
-  if (verbose) {
+  if (verbose > 2) {
     event_warning("Extending note capacity");
   };
   newlimit = maxnotes*2;
@@ -557,23 +1544,52 @@ int maxnotes;
   free(feature);
   feature = fptr;
   ptr = checkmalloc(newlimit*sizeof(int));
+  ptr2 = checkmalloc(newlimit*sizeof(int));
+  ptr3 = checkmalloc(newlimit*sizeof(int));
+  ptr4 = checkmalloc(newlimit*sizeof(int)); /* [SS] 2012-06-29 */
+  ptr5 = checkmalloc(newlimit*sizeof(int)); /* [SS] 2014-12-25 */
+  for (i=0; i<newlimit; i++) {
+      ptr3[i] = 0;
+      ptr4[i] =0;
+      }      
   for(i=0;i<maxnotes;i++){
     ptr[i] = pitch[i];
+    ptr2[i] = pitchline[i];
+    ptr3[i] = bentpitch[i];
+    ptr4[i] = decotype[i];
+    ptr5[i] = charloc[i]; /* [SS] 2014-12-25 */
   };
   free(pitch);
+  free(pitchline);
+  free(bentpitch);
+  free(decotype);
+  free(charloc); /* [SS] 2014-12-25 */
   pitch = ptr;
+  pitchline = ptr2;
+  bentpitch = ptr3;
+  decotype = ptr4; /* [SS] 2012-06-29 */
+  charloc = ptr5; /* [SS] 2014-12-25 */
   ptr = checkmalloc(newlimit*sizeof(int));
   for(i=0;i<maxnotes;i++){
     ptr[i] = num[i];
   };
   free(num);
   num = ptr;
+
   ptr = checkmalloc(newlimit*sizeof(int));
   for(i=0;i<maxnotes;i++){
     ptr[i] = denom[i];
   };
   free(denom);
   denom = ptr;
+
+/* [SS] 2011-08-17 */
+  ptr = checkmalloc(newlimit*sizeof(int));
+  for(i=0;i<maxnotes;i++){
+    ptr[i] = stressvelocity[i];
+  };
+  free(stressvelocity);
+  stressvelocity = ptr;
   return(newlimit);
 }
 
@@ -587,7 +1603,7 @@ char*** stringarray;
   char** ptr;
 
   newlimit = maxstrings*2;
-  if (verbose) {
+  if (verbose > 2) {
     event_warning("Extending text capacity");
   };
   ptr = (char**) checkmalloc(newlimit*sizeof(char*));
@@ -607,6 +1623,7 @@ int f, p, n, d;
   pitch[notes] = p;
   num[notes] = n;
   denom[notes] = d;
+  charloc[notes] = lineposition; /* [SS] 2014-12-25 */
   if ((f == NOTE) || (f == REST) || (f == CHORDOFF)) {
     reduce(&num[notes], &denom[notes]);
   };
@@ -614,6 +1631,84 @@ int f, p, n, d;
   if (notes >= maxnotes) {
     maxnotes = autoextend(maxnotes);
   };
+}
+
+static void replacefeature(f, p, n, d, loc)
+int f, p, n, d, loc;
+{
+  feature[loc] = f;
+  pitch[loc] = p;
+  num[loc] = n;
+  denom[loc] = d;
+}
+
+
+void insertfeature(f, p, n, d, loc)
+/* insert feature in internal table */
+int f,p,n,d,loc;
+{ int i;
+  notes = notes + 1;
+  if (notes >= maxnotes) {
+    maxnotes = autoextend(maxnotes);
+  };
+  for (i=notes;i>loc;i--) {
+    feature[i] = feature[i-1];
+    pitch[i] = pitch[i-1];
+    pitchline[i] = pitchline[i-1];
+    bentpitch[i] = bentpitch[i-1];
+    decotype[i] = decotype[i-1]; /* [SS] 2012-06-29 */
+    charloc[i] = charloc[i-1]; /* [SS] 2014-12-25 */
+    num[i] = num[i-1];
+    denom[i] = denom[i-1];
+    };
+  feature[loc] = f;
+  pitch[loc]   = p;
+  num[i]       = n;
+  denom[i]     = d;
+  pitchline[i] = 0;
+  charloc[i] = lineposition; /* [SS] 2014-12-25 */
+  bentpitch[i] = 0;
+  decotype[i] = 0;
+}
+
+static void removefeature(loc)
+int loc;
+{
+  int i;
+  for (i=loc;i<notes;i++)
+    {
+    feature[i] = feature[i+1];
+    pitch[i]   = pitch[i+1];
+    num[i]     = num[i+1];
+    denom[i]   = denom[i+1];
+    pitchline[i] = pitchline[i+1];
+    bentpitch[i] = bentpitch[i+1];
+    decotype[i] = decotype[i+1]; /* [SS] 2012-06-29 */
+    charloc[i] = charloc[i+1]; /* [SS] 2014-12-25 */
+
+    }
+  notes--;
+}
+
+
+static void removefeatures(locfrom,locto)
+int locfrom,locto;
+{
+  int i;
+  int offset;
+  offset = locto - locfrom + 1;
+  for (i=locfrom;i<notes;i++)
+    {
+    feature[i] = feature[i+offset];
+    pitch[i]   = pitch[i+offset];
+    num[i]     = num[i+offset];
+    denom[i]   = denom[i+offset];
+    pitchline[i] = pitchline[i+offset];
+    bentpitch[i] = bentpitch[i+offset];
+    decotype[i] = decotype[i+offset]; /* [SS] 2014-11-09 */
+    charloc[i]  = charloc[i+offset]; /* [SS] 2014-12-25 */
+    }
+  notes -= offset;
 }
 
 void event_linebreak()
@@ -635,11 +1730,9 @@ char endchar;
   addfeature(MUSICSTOP, 0, 0, 0);
 }
 
-static void textfeature(type, s)
+static void textfeature(int type, char *s)
 /* called while parsing abc - stores an item which requires an */
 /* associared string */
-int type;
-char* s;
 {
   atext[ntexts] = addstring(s);
   addfeature(type, ntexts, 0, 0);
@@ -653,6 +1746,7 @@ void event_comment(s)
 /* comment found in abc */
 char *s;
 {
+  if (nocom) return;
   if (dotune) {
     if (pastheader) {
       textfeature(TEXT, s);
@@ -662,6 +1756,52 @@ char *s;
   };
 }
 
+void readaln (char out[], char **in, int limit);
+
+/* [SS] 2015-06-01 For interpreting the %%MIDIdef command */
+void parse_mididef(s)
+char *s;
+{
+char *p;
+if (nmidicmd >= MAXMIDICMD) {
+    event_error("Too many %%MIDIdef's ");
+    return;
+    }
+p = s;
+skipspace(&p);
+readaln(midicmdname[nmidicmd], &p, 31);
+skipspace(&p);
+midicmd[nmidicmd] =  addstring(p);
+nmidicmd++;
+}
+
+/* [SS] 2015-06-01 For converting the %%MIDIx command to a
+   %%MIDI command
+*/
+char * expand_midix(s)
+char *s;
+{
+char msg[200];
+char *p;
+char name[32];
+int i;
+p = s;
+skipspace(&p);
+readaln(&name,&p,31);
+for (i=0; i<nmidicmd;i++) {
+	  if (strcmp(midicmdname[i],name) == 0) break;
+	  }
+/* [SS] 2015-07-15 */
+if (i == nmidicmd) {
+    sprintf(msg, "cannot match %%%%MIDIx %s with corresponding MIDIdef", name);
+    event_error(msg);
+    return("null");
+    }
+return midicmd[i];
+}
+
+
+
 void event_specific(package, s)
 /* package-specific command found i.e. %%NAME */
 /* only %%MIDI commands are actually handled */
@@ -669,10 +1809,28 @@ char *package, *s;
 {
   char msg[200], command[40];
   char *p;
+  int done;
 
+  if (started_parsing == 0) {
+	event_specific_in_header(package,s);
+	return;
+	}
+
+/* [SS] 2015-06-01 */
+  if (strcmp(package,"MIDIdef") == 0) {
+     parse_mididef(s);
+     return;
+     }
+
+  if (strcmp(package,"MIDIx") == 0) {
+     s = expand_midix(s);
+     if (strcmp(s,"null") == 0) return;
+     package = "MIDI";
+     }
+
+ 
   if (strcmp(package, "MIDI") == 0) {
     int ch;
-    int done;
     int trans, rtrans;
 
     p = s;
@@ -682,7 +1840,19 @@ char *package, *s;
     if (strcmp(command, "channel") == 0) {
       skipspace(&p);
       ch = readnump(&p) - 1;
+      if (v != NULL) {
+        if (ch == 9) v->drumchannel = 1;
+        else v->drumchannel = 0;
+        }
+      /* [SS] 2015-03-23 */
+      if (ch <0 || ch >15) {
+          event_error("channel not between 1 and 16 ");
+          ch = 1;
+          }
       addfeature(CHANNEL, ch, 0, 0);
+      if (v != NULL) {
+          if (v->midichannel == -1) v->midichannel = ch; /* [SS] 2015-03-24 */
+          }
       done = 1;
     };
     trans = strcmp(command, "transpose");
@@ -700,19 +1870,12 @@ char *package, *s;
       skipspace(&p);
       val = readnump(&p);
       if (neg) val = - val;
-      if (pastheader) {
+
         if (trans == 0) {
-          addfeature(TRANSPOSE, val, 0, 0);
+          addfeature(GTRANSPOSE, val, 0, 0);
         } else {
           addfeature(RTRANSPOSE, val, 0, 0);
         };
-      } else {
-        if (trans == 0) {
-          global_transpose = val;
-        } else {
-          global_transpose = global_transpose + val;
-        };
-      };
       done = 1;
     };
     if (strcmp(command, "C") == 0) {
@@ -731,6 +1894,29 @@ char *package, *s;
       retain_accidentals = 1;
       done = 1;
     };
+    if (strcmp(command, "fermatafixed") == 0) {
+      fermata_fixed = 1;
+      done = 1;
+    };
+    if (strcmp(command, "fermataproportional") == 0) {
+      fermata_fixed = 0;
+      done = 1;
+    };
+
+    /* [SS] 2014-01-12 */
+    if (strcmp(command, "tuningsystem") == 0) {
+      skipspace(&p);
+      if (strcmp(p,"comma53") == 0) {
+        printf("%s\n",p);
+        comma53 = 1;
+        init_p48toc53();
+        done = 1;
+#ifdef MAKAM
+        fc53 = fopen("abcmid.txt","w");
+#endif
+        }
+    };
+
     if (strcmp(command, "ratio") == 0) {
       int a, b;
 
@@ -750,9 +1936,10 @@ char *package, *s;
       };
       done = 1;
     };
+
     if (strcmp(command, "grace") == 0) {
       int a, b;
-      char msg[40];
+      char msg[200];
 
       skipspace(&p);
       a = readnump(&p);
@@ -767,7 +1954,7 @@ char *package, *s;
         event_error(msg);
       } else {
         if (pastheader) {
-          addfeature(SETGRACE, a, 0, b);
+          addfeature(SETGRACE, 1, a, b);
         } else {
           gfact_num = a;
           gfact_denom = b;
@@ -775,6 +1962,69 @@ char *package, *s;
       };
       done = 1;
     };
+
+    if(strcmp(command,"gracedivider") == 0) {
+      int b;
+      char msg[200];
+      skipspace(&p);
+      b = -1;
+      b = readnump(&p);
+     if (b < 2)
+       {
+       sprintf(msg, "a number 2 or larger should follow MIDI gracedivider");
+      event_error(msg);
+      }
+      if (pastheader)
+         addfeature(SETGRACE, 0, 1, b);
+      else {gfact_denom = b; gfact_method = 0;}
+      done = 1;
+    }
+
+
+    if (strcmp(command, "trim") == 0) {
+      int a, b;
+      skipspace(&p);
+      a = readnump(&p);
+      if (*p != '/') {
+        event_error("Need / in MIDI trim command (eg trim 1/4)");
+      } else {
+        p = p + 1;
+        b = readnump(&p);
+       if (v != NULL) {
+        addfeature(SETTRIM, 1, 4*a, b*v->default_length);
+        } else {
+        if (global.default_length == -1) 
+          event_error("Need to define L: before trim command: trim command ignored.");
+        else 
+          addfeature(SETTRIM,1,4*a, b*global.default_length);
+       };
+      };
+      done = 1;
+    };
+
+    /* [SS] 2015-06-16 */
+    if (strcmp(command, "expand") == 0) {
+      int a, b;
+      skipspace(&p);
+      a = readnump(&p);
+      if (*p != '/') {
+        event_error("Need / in MIDI expand command (eg trim 1/4)");
+      } else {
+        p = p + 1;
+        b = readnump(&p);
+       if (v != NULL) {
+        addfeature(EXPAND, 1, 4*a, b*v->default_length);
+        } else {
+        if (global.default_length == -1) 
+          event_error("Need to define L: before expand command: expand command ignored.");
+        else 
+          addfeature(EXPAND,1,4*a, b*global.default_length);
+       };
+      };
+      done = 1;
+    };
+
+
     if (strcmp(command, "gchordon") == 0) {
       addfeature(GCHORDON, 0, 0, 0);
       done = 1;
@@ -785,8 +2035,398 @@ char *package, *s;
     };
     if (strcmp(command, "chordname") == 0) {
       char name[20];
-      int i, notes[6];
+      int i, notes[10]; /* [SS] 2012-01-29 */
 
+      skipspace(&p);
+      i = 0;
+      while ((i<19) && (*p != ' ') && (*p != '\0')) {
+        name[i] = *p;
+        p = p + 1;
+        i = i + 1;
+      };
+      name[i] = '\0';
+      if (*p != ' ') {
+        event_error("Bad format for chordname command");
+      } else {
+        i = 0;
+        while ((i<=10) && (*p == ' ')) { /* [SS] 2012-01-29 */
+          skipspace(&p);
+          notes[i] = readsnump(&p); 
+          i = i + 1;
+        };
+        addchordname(name, i, notes);
+      };
+      done = 1;
+    };
+
+
+  if (strcmp(command, "temperamentlinear") == 0) {
+      double octave_cents=0.0;
+      double fifth_cents=0.0;
+      temperament = 1;
+      middle_c = 60*SEMISIZE;
+
+      if (sscanf(p," %lf %lf ",&octave_cents,&fifth_cents) == 2) {
+        octave_size = (int)(octave_cents*SEMISIZE/100+0.5);
+        fifth_size = (int)(fifth_cents*SEMISIZE/100+0.5);
+	sharp_size = 7*fifth_size - 4*octave_size; /* [HL] 2015-05-15] */
+	
+	if(verbose) { /* [HL] 2015-05-15] */
+	    printf("temperamentlinear:\n"
+		   "\targs: %lf %lf\n",octave_cents, fifth_cents);
+	    printf("\toctave_size = %d (%.2lf cents)\n"
+		   "\tfifth_size = %d (%.2lf cents)\n"
+		   "\twhole-tone size = %d (%.2lf cents)\n"
+		   "\taccidental_size = %d (%.2lf cents)\n"
+		   ,
+		   octave_size,
+		   100.0*octave_size/SEMISIZE,
+		   fifth_size,100.0*fifth_size/SEMISIZE,
+		   2*fifth_size - octave_size, 100.0*(2.0*fifth_size-octave_size)/SEMISIZE,
+		   sharp_size,100.0*sharp_size/SEMISIZE
+		   );
+	}
+
+      }
+      else {
+        event_error("Bad format for temperamentlinear command");
+      }
+      done = 1;
+    }
+
+  /* [HL] 2015-05-15 */
+  if (strcmp(command, "temperamentequal") == 0) {
+      double octave_cents;
+      double fifth_cents;
+      int acc_size;
+      int narg, ndiv, fifth_index, sharp_steps;
+
+      narg = sscanf(p," %d %lf %d %d ",&ndiv, &octave_cents, &fifth_index, &sharp_steps);
+
+ 
+
+      switch (narg) {
+      case 1:
+	  octave_size = (int)( 1200.0 *SEMISIZE/100.0 + 0.5);
+	  fifth_size = (int)( 1901.96 *SEMISIZE/100.0 + 0.5) - octave_size;
+	  fifth_size = ((int)(1.0* ndiv *fifth_size/octave_size + 0.5)) * (1.0*octave_size/ndiv);
+	  acc_size = 7*fifth_size - 4*octave_size;
+	  break;
+      case 2:
+	  octave_size = (int)(octave_cents * SEMISIZE/100.0 + 0.5);
+	  fifth_size = (int) (1901.95500086539 *SEMISIZE/100.0 + 0.5) - octave_size;
+	  fifth_size = ((int) ( 1.0 * fifth_size/octave_size*ndiv + 0.5 )) * (1.0*octave_size/ndiv);
+	  acc_size = 7*fifth_size - 4*octave_size;
+	  break;
+      case 3:
+	  octave_size = (int)(octave_cents * SEMISIZE/100.0 + 0.5);
+	  if (fifth_index > 0) /* user-defined fifth size */
+	      fifth_size = (int) ( 1.0 * fifth_index * octave_size/ndiv + 0.5);
+	  else {               /* automatically computed fifth size */
+	      fifth_size = (int) (1901.95500086539 *SEMISIZE/100.0 + 0.5) - octave_size;
+	      fifth_size = ((int) ( 1.0 * fifth_size/octave_size*ndiv + 0.5 )) * (1.0*octave_size/ndiv);
+	  }
+	  acc_size = 7*fifth_size - 4*octave_size;
+	  break;
+      case 4:
+	  octave_size = (int)(octave_cents * SEMISIZE/100.0 + 0.5);
+	  if (fifth_index > 0) /* user-defined fifth size */
+	      fifth_size = (int) ( 1.0 * fifth_index * octave_size/ndiv + 0.5);
+	  else {               /* automatically computed fifth size */
+	      fifth_size = (int) (1901.95500086539 *SEMISIZE/100.0 + 0.5) - octave_size;
+	      fifth_size = ((int) ( 1.0 * fifth_size/octave_size*ndiv + 0.5 )) * (1.0*octave_size/ndiv);
+	  }
+	  /* user-defined accidental size */
+	  acc_size = (int) (1.0 * sharp_steps * octave_size/ndiv + 0.5);
+	  break;
+      default:
+	  event_error("Bad format for temperamentequal command");
+      }
+      
+      sharp_size = acc_size;
+
+      if(verbose) {
+	  printf("temperamentequal:\n"
+		 "\targs (%d): %d %lf %d %d\n",narg, ndiv, octave_cents, fifth_index, sharp_steps);
+	  printf("\tndiv = %d\n"
+		 "\toctave_size = %d (%.2lf cents)\n"
+		 "\tfifth_size = %d (%.2lf cents) (%d steps)\n"
+		 "\twhole-tone size = %d (%.2lf cents) (%d steps)\n"
+		 "\taccidental_size = %d (%.2lf cents) (%d steps)\n"
+		 ,
+		 ndiv,octave_size,
+		 100.0*octave_size/SEMISIZE,
+		 fifth_size,100.0*fifth_size/SEMISIZE,
+		 (int)(1.0*fifth_size/octave_size*ndiv+0.5),
+		 2*fifth_size - octave_size, 100.0*(2.0*fifth_size-octave_size)/SEMISIZE,
+		 (int)(1.0*(2*fifth_size-octave_size)/octave_size*ndiv+0.5),
+		 acc_size,100.0*acc_size/SEMISIZE,
+		 (int)(1.0*acc_size/octave_size*ndiv+0.5)
+		 );
+      }
+      
+      if (acc_size < 0)
+	  event_warning( "temperamentequal <ndiv> [octave_in_cents] [fifth_in_steps] [sharp_in_steps]\n"
+			 "\tValue(s) cause(s) inconsistent (inverted) accidentals.\n"
+			 "\tTry with different parameters as, for example,\n"
+			 "\tsome multiple of <ndiv> for 'temperamentequal',\n"
+			 "\tor force a suitable value for 'sharp_in_steps'.\n"
+			 );
+      
+
+      temperament = 1;
+      middle_c = 60*SEMISIZE;
+      done = 1;
+    }
+
+  if (strcmp(command, "temperamentnormal") == 0) {
+      temperament = 0;
+      event_normal_tone();
+      done = 1;
+      middle_c = 60;
+      }
+
+
+    if (strcmp(command,"drumon") == 0 && dotune) {  /* [SS] 2010-05-26 */
+      addfeature(DRUMON, 0, 0, 0);
+      v->hasdrums = 1;
+      drumvoice = v->indexno; /* [SS] 2010-02-09 */
+      done = 1;
+      if (v == NULL) event_error("%%MIDI drumon must occur after the first K: header");
+    }
+    if (strcmp(command,"drumoff") == 0) {
+       addfeature(DRUMOFF, 0, 0, 0);
+       done = 1;
+    }
+
+    if (strcmp(command,"droneon") == 0 && dotune) {
+      addfeature(DRONEON, 0, 0, 0);
+      v->hasdrone = 1;
+      if ((dronevoice != 0) && (dronevoice != v->indexno)) {
+        event_warning("Implementation limit: drones only supported in one voice");
+       };
+      if (v == NULL) event_error("%%MIDI droneon must occur after the first K: header");
+      else {
+           dronevoice = v->indexno;
+           done = 1;
+           }
+    }
+    if (strcmp(command,"droneoff") == 0) {
+       addfeature(DRONEOFF, 0, 0, 0);
+       done = 1;
+    }
+
+    if (strcmp(command, "deltaloudness") == 0) {
+      skipspace(&p);
+      velocitychange = readnump(&p);
+      done = 1;
+      }
+
+	if (strcmp(command, "harpmode") == 0) {  /* [JS] 2011-04-29 */
+      skipspace(&p);
+      harpmode = readnump(&p);
+      done = 1;
+    };
+
+
+    if (done == 0) {
+      /* add as a command to be interpreted later */
+      textfeature(DYNAMIC, s);
+    };
+  } else
+  {
+/* Parse %%abc directive */
+      done = 0;
+      if (strcmp(package, "abc") == 0)
+      {
+         p = s;
+         skipspace(&p);
+/* skip '-' character after abc */          
+         p++;
+         readstr(command, &p, 40);
+/* Parse %%abc-copyright */
+         if (strcmp(command, "copyright") == 0)
+         {            
+            int lnth;
+            int n;
+            char *ptr;
+
+            done = 1;            
+            skipspace(&p);
+/* Copy string to parse.
+ * Convert \n, \t, \r, \x and \\ in string to C style character constant defaults.
+ * (Handles carriage return, linefeed and tab characters and hex codes.)
+ */
+            lnth = 0;
+            ptr = &msg[0];
+            while ((*p != '\0') && (lnth < 199))
+            { 
+               if (*p == '\\')
+               {
+                  p++;
+                  switch (*p)
+                  {
+                     case 'n':
+                        *ptr = '\n';
+                        break;
+                     case 'r':  
+                        *ptr = '\r';
+                        break;
+                     case 't':  
+                        *ptr = '\t';
+                        break;
+                     case '\\':
+                        *ptr = *p;
+                        break; 
+                     case 'x':
+                     case 'X':
+                        p++;
+                        sscanf (p, "%x", &n);
+                        *ptr = n;
+                        while ((*p != '\0') && (isxdigit (*p)))                     
+                           p++;
+                        p--;   
+                        break;
+                     default:
+                        *ptr = *p;
+                        break;
+                  }
+               }
+               else
+                  *ptr = *p;
+               ptr++;
+               p++;
+              lnth++;          /* Anselm Lingnau 2005-01-04 */
+            }
+            *ptr = '\0';
+            textfeature(COPYRIGHT, msg);
+           if (*p != '\0') {   /* Anselm Lingnau 2005-01-04 */
+               event_warning("ABC copyright notice abridged");
+           }
+        }
+        else
+        {
+
+           /* Changed by Anselm Lingnau, 2005-01-04, for security */
+#ifdef NO_SNPRINTF
+          if (sprintf(msg, "%%%s%s", package, s) > sizeof(msg)) {
+              event_warning("event_specific: comment too long");
+          }
+#else
+          if (snprintf(msg,sizeof(msg), "%%%s%s", package, s) > sizeof(msg)) {
+              event_warning("event_specific: comment too long");
+          }
+#endif
+        event_comment(msg);
+        }
+      }
+     if (strcmp(package, "propagate") == 0) {
+          p = s;
+          p = p + 13;
+         printf("propagate-accidentals encountered\n");
+         if (strcmp(p,"not") == 0) {
+             nopropagate_accidentals = 1;
+          } else {nopropagate_accidentals = 0;}
+         done = 1;
+            }
+
+    if (done == 0)  
+    {
+
+/* changed by Anselm Lingnau on 2004-01-04, for security */
+#ifdef NO_SNPRINTF
+   if (sprintf(msg, "%%%s%s", package, s) > sizeof(msg)) {
+      event_warning("event_specific: message too long");
+   }
+#else
+   if (snprintf(msg, sizeof(msg), "%%%s%s", package, s) > sizeof(msg)) {
+      event_warning("event_specific: message too long");
+   }
+#endif
+
+    event_comment(msg);
+    }
+  }
+}
+
+
+
+/* global variables that can altered by %%MIDI before tune */
+int default_middle_c = 60;
+int default_retain_accidentals = 1;
+int default_fermata_fixed = 0;
+int default_ratio_a = 2;
+int default_ratio_b = 4;
+
+void event_specific_in_header(package, s)
+/* package-specific command found i.e. %%NAME */
+/* only %%MIDI commands are actually handled */
+char *package, *s;
+{
+  char  command[40];
+  char *p;
+  int done;
+
+  if (strcmp(package, "MIDI") == 0) {
+
+    p = s;
+    done = 0;
+    skipspace(&p);
+    readstr(command, &p, 40);
+
+
+
+    if (strcmp(command, "C") == 0) {
+      int val;
+
+      skipspace(&p);
+      val = readnump(&p);
+      default_middle_c = val;
+      done = 1;
+    };
+    if (strcmp(command, "nobarlines") == 0) {
+      default_retain_accidentals = 0;
+      done = 1;
+    };
+    if (strcmp(command, "barlines") == 0) {
+      default_retain_accidentals = 1;
+      done = 1;
+    };
+    if (strcmp(command, "fermatafixed") == 0) {
+      default_fermata_fixed = 1;
+      done = 1;
+    };
+    if (strcmp(command, "fermataproportional") == 0) {
+      default_fermata_fixed = 0;
+      done = 1;
+    };
+    if (strcmp(command, "harpmode") == 0) {  /* [JS] 2011-04-29 */
+      skipspace(&p);
+      harpmode = readnump(&p);
+      done = 1;
+    };
+    if (strcmp(command, "ratio") == 0) {
+      int a, b;
+      skipspace(&p);
+      b = readnump(&p);
+      skipspace(&p);
+      a = readnump(&p);
+      if ((a > 0) && (b > 0)) {
+        default_ratio_a = a;
+        default_ratio_b = b;
+        if (default_ratio_a + default_ratio_b % 2 == 1) {
+          default_ratio_a = 2 * a;
+          default_ratio_b = 2 * b;
+        };
+      } else {
+        event_error("Invalid ratio");
+      };
+      done = 1;
+    };
+
+    if (strcmp(command, "chordname") == 0) {
+      char name[20];
+      int i, notes[6];
       skipspace(&p);
       i = 0;
       while ((i<19) && (*p != ' ') && (*p != '\0')) {
@@ -801,24 +2441,27 @@ char *package, *s;
         i = 0;
         while ((i<=6) && (*p == ' ')) {
           skipspace(&p);
-          notes[i] = readnump(&p);
+          notes[i] = readsnump(&p); 
           i = i + 1;
         };
         addchordname(name, i, notes);
       };
       done = 1;
     };
+
+
+    if (strcmp(command, "deltaloudness") == 0) {
+      skipspace(&p);
+      velocitychange = readnump(&p);
+      done = 1;
+      }
+
     if (done == 0) {
-      /* add as a command to be interpreted later */
-      textfeature(DYNAMIC, s);
-    };
-  } else {
-    strcpy(msg, "%");
-    strcat(msg, package);
-    strcat(msg, s);
-    event_comment(msg);
-  };
+       event_warning("cannot handle this MIDI directive in file header");
+    }
+  }
 }
+
 
 void event_startinline()
 /* start of in-line field in abc music line */
@@ -868,6 +2511,7 @@ void extract_filename(char *f)
 
 void event_field(k, f)
 /* Handles R: T: and any other field not handled elsewhere */
+/* Added code to handle C: field. */
 char k;
 char *f;
 {
@@ -879,23 +2523,27 @@ char *f;
         extract_filename(f);
       };
       break;
+    case 'C':
+      textfeature(COMPOSER, f);
+      break;
     case 'R':
       {
-        char* p;
-
+        char* p; 
         p = f;
+        strncpy(rhythmdesignator,f,32); /* [SS] 2011-08-19 */
         skipspace(&p);
-        if ((strncmp(p, "Hornpipe", 8) == 0) ||
-            (strncmp(p, "hornpipe", 8) == 0)) {
+        if (((strncmp(p, "Hornpipe", 8) == 0) ||
+            (strncmp(p, "hornpipe", 8) == 0)) &&
+             barflymode ==0) {   /* [SS] 2011-08-19 */
           hornpipe = 1;
         };
       };
       break;
     default:
       {
-        char buff[100];
-
-        if (strlen(f) < 98) {
+        char buff[256];
+        
+        if (strlen(f) < 256) {
           sprintf(buff, "%c:%s", k, f);
           textfeature(TEXT, buff);
         };
@@ -913,13 +2561,13 @@ void event_words(p, continuation)
 char* p;
 int continuation;
 {
-  int l;
 
   karaoke = 1;
+  if (v == NULL) {
+    event_error("missplaced w: field. w: field ignored");
+    return;
+    }
   v->haswords = 1;
-  if ((wordvoice != 0) && (wordvoice != v->indexno)) {
-    event_warning("More than one voice with words in");
-  };
   wordvoice = v->indexno;
   words[wcount] = addstring(p);
   addfeature(WORDLINE, wcount, 0, 0);
@@ -932,6 +2580,24 @@ int continuation;
   };
 }
 
+/* [SS] 2014-08-16 */
+void append_words (morewords)
+char *morewords;
+{
+char *p;
+p = concatenatestring(words[wcount-1],morewords);
+words[wcount-1] = p;
+}
+
+/* [SS] 2014-08-16 */
+void appendfield (morewords)
+char *morewords;
+{
+append_words (morewords);
+}
+
+
+
 static void checkbreak()
 /* check that we are in not in chord, grace notes or tuple */
 /* called at voice change */
@@ -942,7 +2608,7 @@ static void checkbreak()
   };
   if (v->inchord != 0) {
     event_error("Previous voice has incomplete chord");
-    event_chordoff();
+    event_chordoff(1,1);
   };
   if (v->ingrace != 0) {
     event_error("Previous voice has unfinished grace notes");
@@ -971,10 +2637,13 @@ char ch;
 static void read_spec(spec, part)
 /* converts a P: field to a list of part labels */
 /* e.g. P:A(AB)3(CD)2 becomes P:AABABABCDCD */
+
+/********** This feature is not supported ********[SS] 2004-10-08      */
 /* A '+' indicates 'additive' behaviour (a part may include repeats).  */
 /* A '-' indicates 'non-additive' behaviour (repeat marks in the music */
 /* are ignored and only repeats implied by the part order statement    */
 /* are played).  */
+
 char spec[];
 struct vstring* part;
 {
@@ -992,14 +2661,15 @@ struct vstring* part;
     if (*in == '.') {
       in = in + 1;
     };
-    if (*in == '+') {
-      additive = 1;
-      in = in + 1;
-    };
-    if (*in == '-') {
-      additive = 0;
-      in = in + 1;
-    };
+/*    if (*in == '+') {     no longer supported
+*      additive = 1;
+*      in = in + 1;
+*    };
+*    if (*in == '-') {
+*      additive = 0;
+*      in = in + 1;
+*    };
+*/
     if ((*in >= 'A') && (*in <= 'Z')) {
       char_out(part, *in);
       lastch = *in;
@@ -1065,9 +2735,10 @@ char* s;
   if (dotune) {
     p = s;
     skipspace(&p);
+    if (pastheader && parts == -1) return; /* [SS] 2014-04-10 */
     if (pastheader) {
       if (((int)*p < 'A') || ((int)*p > 'Z')) {
-        event_error("Part must be one of A-Z");
+        if (!silent) event_error("Part must be one of A-Z");
         return;
       };
       if ((headerpartlabel == 1) && (part.st[0] == *p)) {
@@ -1095,16 +2766,30 @@ char* s;
   };
 }
 
-void event_voice(n, s)
+void event_voice(n, s, vp)
 /* handles a V: field in the abc */
 int n;
 char *s;
+struct voice_params *vp;
 {
-  if (pastheader) {
+  if (!voicesused && bodystarted) {event_warning("First V: field occurs past body; will combine this body with this voice.");
+     bodystarted = 0;
+     }
+  if (pastheader || XTEN1) {
     voicesused = 1;
-    checkbreak();
-    v = getvoicecontext(n);
-    addfeature(VOICE, v->indexno, 0, 0);
+    if (pastheader)  checkbreak();
+
+
+    v = getvoicecontext(n); 
+    addfeature(VOICE, v->indexno, 0, 0); 
+    
+    dependent_voice[v->indexno] = 0;
+    if (vp->gotoctave) {
+      event_octave(vp->octave,1);
+    };
+    if (vp->gottranspose) {
+      addfeature(TRANSPOSE, vp->transpose, 0, 0);
+    };
   } else {
     event_warning("V: in header ignored");
   };
@@ -1140,6 +2825,21 @@ int *t_num, *t_denom;
   };
 }
 
+int get_tempo_from_name (s) /* [SS] 2010-12-07 */
+char *s;
+{
+int i,n;
+if (s == NULL) return 0; /* [SS] 2010-12-10 */
+for (i=0;i<19;i++) {
+   if (strcasecmp(s,temponame[i]) == 0)
+      {n = temporate[i];
+       return n;
+      }
+  }
+return 0;
+}
+
+
 void event_tempo(n, a, b, rel, pre, post)
 /* handles a Q: field e.g. Q: a/b = n  or  Q: Ca/b = n */
 /* strings before and after are ignored */
@@ -1153,9 +2853,11 @@ char *post;
   long new_tempo;
   int tempo_l, tempo_h;
 
+
+  if (n == 0) n = get_tempo_from_name(pre); /* [SS] 2010-12-07 */
   if ((n == 0) || ((a!=0) && (b == 0))) {
-    event_error("malformed Q: field ignored");
-  } else {
+       event_error("malformed Q: field ignored");
+    } else {
     if (dotune) {
       if (pastheader) {
         tempo_num = a;
@@ -1185,22 +2887,37 @@ int n, m, dochecking;
   if (dotune) {
     if (pastheader) {
       addfeature(TIME, dochecking, n, m);
+      mtime_num = n; /* [SS] 2012-11-03 */
+      mtime_denom = m; /* [SS] 2012-11-03 */
+      if (v != NULL) {
+        v->active_meter_num =  n; /* [SS] 2012-11-08 */
+        v->active_meter_denom =  m; /* [SS] 2012-11-08 */
+        }
     } else {
       time_num = n;
       time_denom = m;
+      mtime_num = n; /* [SS] 2012-11-03 */
+      mtime_denom = m; /* [SS] 2012-11-03 */
+
+      /* [SS] 2015-03-11                                */
+      /*if (v != NULL) {                                */
+      /*  v->active_meter_num =  n;  [SS] 2012-11-08    */
+      /*  v->active_meter_denom =  m;  [SS] 2012-11-08  */
+      /*  }                                             */
+      meter_voice_update(n,m); /* [SS] 2015-03-11 */
       timesigset = 1;
       barchecking = dochecking;
     };
   };
 }
 
-void event_octave(num)
+void event_octave(num, local)
 /* used internally by other routines when octave=N is encountered */
 /* in I: or K: fields */
 int num;
 {
   if (dotune) {
-    if (pastheader) {
+    if (pastheader || local) {
       v->octaveshift = num;
     } else {
       global.octaveshift = num;
@@ -1214,10 +2931,16 @@ char* value;
 {
   int num;
 
+#ifdef INFO_OCTAVE_DISABLED
+  return;
+#endif
   if (strcmp(key, "octave")==0) {
     num = readsnumf(value);
-    event_octave(num);
+    event_octave(num,0);
   };
+  /* [SS] 2015-06-02 */
+  if (strcmp(key, "MIDI") == 0 || strcmp(key, "MIDIx") == 0)
+     event_specific(key, value);
 }
 
 static void stack_broken(v)
@@ -1284,31 +3007,6 @@ void event_graceoff()
   };
 }
 
-void event_rep1()
-/* [1 in the abc */
-{
-  addfeature(PLAY_ON_REP, 0, 0, 1);
-/*
-  if ((notes == 0) || (feature[notes-1] != SINGLE_BAR)) {
-    event_error("[1 must follow a single bar");
-  } else {
-    feature[notes-1] = BAR1;
-  };
-*/
-}
-
-void event_rep2()
-/* [2 in the abc */
-{
-  addfeature(PLAY_ON_REP, 0, 0, 2);
-/*
-  if ((notes == 0) || (feature[notes-1] != REP_BAR)) {
-    event_error("[2 must follow a :| ");
-  } else {
-    feature[notes-1] = REP_BAR2;
-  };
-*/
-}
 
 void event_playonrep(s)
 char* s;
@@ -1329,85 +3027,40 @@ char* s;
   };
 }
 
-static void slurtotie()
-/* converts a pair of identical slurred notes to tied notes */
-{
-  int last1, slurtie, last2, failed;
-  int j;
 
-  if ((!v->ingrace) && (!v->inchord)) {
-    j = notes-1;
-    failed = 0;
-    last1 = -1;
-    while ((j>=0) && (!failed) && (last1 == -1)) {
-      if (feature[j] == NOTE) {
-        last1 = j;
-      };
-      if ((j<=0) || (feature[j] == REST) || (feature[j] == CHORDOFF) ||
-          (feature[j] == GRACEOFF) || (feature[j] == SLUR_ON)) {
-        failed = 1;
-      };
-      j = j - 1;
-    };
-    slurtie = -1;
-    while ((j>=0) && (!failed) && (slurtie == -1)) {
-      if (feature[j] == SLUR_TIE) {
-        slurtie = j;
-      };
-      if ((j<=0) || (feature[j] == REST) || (feature[j] == CHORDOFF) ||
-          (feature[j] == GRACEOFF) || (feature[j] == SLUR_ON) ||
-          (feature[j] == NOTE)) {
-        failed = 1;
-      };
-      j = j - 1;
-    };
-    last2 = -1;
-    while ((j>=0) && (!failed) && (last2 == -1)) {
-      if (feature[j] == NOTE) {
-        last2 = j;
-      };
-      if ((j<=0) || (feature[j] == REST) || (feature[j] == CHORDOFF) ||
-          (feature[j] == GRACEOFF) || (feature[j] == SLUR_ON)) {
-        failed = 1;
-      };
-      j = j - 1;
-    };
-    if ((!failed) && (pitch[last1] == pitch[last2])) {
-      /* promote SLUR_TIE to tie */
-      feature[slurtie] = TIE;
-      event_warning("Slur in abc taken to mean a tie");
-    } else {
-      if (verbose) {
-        event_warning("Slur ignored");
-      };
-    };
-  };
-}
 
 void event_sluron(t)
 /* called when ( is encountered in the abc */
 int t;
 {
-  if (t == 1) {
-    addfeature(SLUR_ON, 0, 0, 0);
-    v->inslur = 1;
-  };
+ if (v->inslur) event_warning("Slur within slur");
+ else {
+      addfeature(SLUR_ON, 0, 0, 0);
+      v->inslur = 1;
+      }
 }
 
 void event_sluroff(t)
 /* called when ) is encountered */
 int t;
 {
-  if (t == 0) {
-    slurtotie();
+if (v->inslur) {
     addfeature(SLUR_OFF, 0, 0, 0);
     v->inslur = 0;
-  };
+    }
+/*else event_warning("No slur to close"); [SS] 2014-04-24 */
 }
+
 
 void event_tie()
 /* a tie - has been encountered in the abc */
 {
+if (gracenotes && ignore_gracenotes) return; /* [SS] 2010-01-12 */
+if (feature[notes-1] == CHORDOFF ||
+    feature[notes-1] == CHORDOFFEX) { /* did a TIE connect with a chord */
+       patchup_chordtie(chordstart,notes-1);
+      }
+  else
   addfeature(TIE, 0, 0, 0);
 }
 
@@ -1491,12 +3144,12 @@ int n, q, r;
 }
 
 void event_chord()
-/* a + has been encountered in the abc */
+/* a + or [ or ]  has been encountered in the abc */
 {
   if (v->inchord) {
-    event_chordoff();
+    event_chordoff(1,1);
   } else {
-    event_chordon();
+    event_chordon(dummydecorator);
   };
 }
 
@@ -1505,142 +3158,14 @@ static void lenmul(n, a, b)
 int n, a, b;
 {
   if ((feature[n] == NOTE) || (feature[n] == REST) || 
-      (feature[n] == CHORDOFF)) {
+      (feature[n] == CHORDOFF)
+       || (feature[n] == CHORDOFFEX)) /* [SS] 2013-04-20 */ {
     num[n] = num[n] * a;
     denom[n] = denom[n] * b;
     reduce(&num[n], &denom[n]);
   };
 }
 
-static void applybroken(place, type, n)
-int place, type, n;
-/* adjust lengths of broken notes */
-{
-  int num1, num2, denom12;
-  int j;
-  int forechord, forestart, foreend, backchord, backstart, backend;
-  int failed, lastnote;
-
-  j = place;
-  failed = 0;
-  forestart = -1;
-  foreend = -1;
-  forechord = 0;
-  /* find following note or chord */
-  while ((!failed) && (forestart == -1)) {
-    if ((feature[j] == NOTE) || (feature[j] == REST)) {
-      forestart = j;
-      if (forechord) {
-        lastnote = forestart;
-      } else {
-        foreend = forestart;
-      };
-    };
-    if ((feature[j] == GRACEON) || (feature[j] == TIE)) {
-      event_error("Unexpected item following broken rhythm");
-    };
-    if (feature[j] == CHORDON) {
-      forechord = 1;
-    };
-    j = j + 1;
-    if (j>=notes) {
-      failed = 1;
-    };
-  };
-  /* look for extend of chord if there is one */
-  while ((!failed) && (foreend == -1)) {
-    if ((feature[j] == NOTE) || (feature[j] == REST)) {
-      lastnote = j;
-    };
-    if ((feature[j] == GRACEON) || (feature[j] == TIE)) {
-      event_error("Unexpected item following broken rhythm");
-    };
-    if (feature[j] == CHORDOFF) {
-      foreend = j;
-    };
-    j = j + 1;
-    if (j>=notes) {
-      failed = 1;
-    };
-  };
-  /* look for note or chord before broken rhythm symbol */
-  j = place;
-  backend = -1;
-  backstart = -1;
-  backchord = 0;
-  while ((!failed) && (backend == -1)) {
-    if ((feature[j] == NOTE) || (feature[j] == REST)) {
-      backend = j;
-      if (backchord) {
-        lastnote = backend;
-      } else {
-        backstart = backend;
-      };
-    };
-    if ((feature[j] == GRACEOFF) || (feature[j] == TIE)) {
-      event_error("Unexpected item preceding broken rhythm");
-    };
-    if (feature[j] == CHORDOFF) {
-      backchord = 1;
-      backend = j;
-    };
-    j = j - 1;
-    if (j<0) {
-      failed = 1;
-    };
-  };
-  /* look for extent of chord if there is one */
-  while ((!failed) && (backstart == -1)) {
-    if ((feature[j] == NOTE) || (feature[j] == REST)) {
-      lastnote = j;
-    };
-    if ((feature[j] == GRACEON) || (feature[j] == TIE)) {
-      event_error("Unexpected item following broken rhythm");
-    };
-    if (feature[j] == CHORDON) {
-      backstart = lastnote;
-    };
-    j = j - 1;
-    if (j<0) {
-      failed = 1;
-    };
-  };
-  switch(n) {
-    case 1:
-      num1 = 4;
-      num2 = 2;
-      break;
-    case 2:
-      num1 = 7;
-      num2 = 1;
-      break;
-    case 3:
-      num1 = 15;
-      num2 = 1;
-      break;
-  };
-  denom12 = (num1 + num2)/2;
-  if (type == LT) {
-    j = num1;
-    num1 = num2;
-    num2 = j;
-  };
-  /* check for same length notes */
-  if ((num[backstart]*denom[forestart]) != 
-             (num[forestart]*denom[backstart])) {
-    failed = 1;
-  };
-  if (failed) {
-    event_error("Cannot apply broken rhythm");
-  } else {
-    for (j=backstart; j<=backend; j++) {
-      lenmul(j, num1, denom12);
-    };
-    for (j=forestart; j<=foreend; j++) {
-      lenmul(j, num2, denom12);
-    };
-  };
-}
 
 static void brokenadjust()
 /* adjust lengths of broken notes */
@@ -1696,6 +3221,8 @@ static void brokenadjust()
   };
 }
 
+
+
 static void marknotestart()
 /* voice data structure keeps a record of last few notes encountered */
 /* in order to process broken rhythm. This is called at the start of */
@@ -1729,14 +3256,25 @@ static void marknote()
   marknoteend();
 }
 
-void event_rest(n,m)
+/* just a stub to ignore 'y' */
+void event_spacing(n, m)
+int n,m;
+{
+}
+
+void event_rest(decorators,n,m,type)
 /* rest of n/m in the abc */
-int n, m;
+int n, m,type;
+int decorators[DECSIZE];
 {
   int num, denom;
 
   num = n;
   denom = m;
+  if (decorators[FERMATA] && !ignore_fermata) {
+    if (fermata_fixed) addfract(&num,&denom,1,1);
+    else num = num*2;
+  };
   if (v == NULL) {
     event_fatal_error("Internal error : no voice allocated");
   };
@@ -1754,8 +3292,7 @@ int n, m;
         };
       };
     };
-    if ((!gracenotes) &&
-        ((!v->inchord) || ((v->inchord) && (v->chordcount == 1)))) {
+    if ((!gracenotes) && (!v->inchord)) {
       tuplecount = tuplecount - 1;
     };
   };
@@ -1779,21 +3316,33 @@ void event_mrest(n,m)
 int n, m;
 {
   int i;
+  int decorators[DECSIZE];
+  decorators[FERMATA]=0;
+/* it is not legal to pass a fermata to a multirest */
 
   for (i=0; i<n; i++) {
-    event_rest(time_num*(v->default_length), time_denom);
+    /* [SS] 2012-11-03 */
+    /*event_rest(decorators,time_num*(v->default_length), time_denom,0);*/
+    event_rest(decorators,mtime_num*(v->default_length), mtime_denom,0);
     if (i != n-1) {
       event_bar(SINGLE_BAR, "");
     };
   };
 }
 
-void event_chordon()
+void event_chordon(int chorddecorators[])
 /* handles a chord start [ in the abc */
+/* the array chorddecorators is needed in toabc.c and yapstree.c */
+/* and is used here to handle fermatas.                          */
 {
+  inchordflag = 1; /* [SS] 2012-03-30 */
+  apply_fermata_to_chord = chorddecorators[FERMATA]; /* [SS] 2012-03-26 */
   if (v->inchord) {
     event_error("Attempt to nest chords");
   } else {
+    chordstart = notes;
+    if (easyabcmode) 
+         addfeature(META,0,lineno,lineposition); /* [SS] 2011-07-18 */
     addfeature(CHORDON, 0, 0, 0);
     v->inchord = 1;
     v->chordcount = 0;
@@ -1803,16 +3352,53 @@ void event_chordon()
   };
 }
 
-void event_chordoff()
+
+void event_chordoff(int chord_n, int chord_m)
 /* handles a chord close ] in the abc */
 {
+  int c_n,c_m;
+  inchordflag = 0; /* [SS] 2012-03-30 */
+  if (chord_m == 1 && chord_n == 1) {
+     c_m = denom[chordstart];
+     c_n = num[chordstart];
+     }
+  else {c_m = chord_m; c_n = chord_n;}
+
   if (!v->inchord) {
     event_error("Chord already finished");
   } else {
-    addfeature(CHORDOFF, 0, v->chord_num, v->chord_denom);
+  if (tuplecount > 0) {
+    c_n = c_n * tfact_num;
+    c_m = c_m * tfact_denom;
+    if (tnote_num == 0) {
+        tnote_num   = c_n;
+        tnote_denom = c_m;
+    } else {
+    /*   if (tnote_num * c_m != c_n * tnote_denom) {
+          if (!specialtuple) {
+            event_warning("Different length notes in tuple for chord");
+           };
+        };
+      [SS] 2013-04-24 */
+     }
+     if ((!gracenotes) && (!v->inchord)) {
+        tuplecount = tuplecount - 1;
+        };
+    };
+
+    if(chord_m == 1 && chord_n == 1) /* chord length not set outside [] */
+      addfeature(CHORDOFF, 0, v->chord_num, v->chord_denom); 
+    else
+      {
+
+      addfeature(CHORDOFFEX, 0, c_n*4, c_m*v->default_length);
+      fix_enclosed_note_lengths(chordstart, notes-1);
+      }
+      
     v->inchord = 0;
     v->chordcount = 0;
     marknoteend();
+    if (tuplecount > 0) --tuplecount;
   };
 }
 
@@ -1823,14 +3409,15 @@ char *p;
   /* does nothing */
 }
 
-static int pitchof(note, accidental, mult, octave, propogate_accs)
+static int pitchof(note, accidental, mult, octave, propagate_accs)
+/* This code is used for handling gchords */
 /* finds MIDI pitch value for note */
-/* if propogate_accs is 1, apply any accidental to all instances of  */
-/* that note in the bar. If propogate_accs is 0, accidental does not */
+/* if propagate_accs is 1, apply any accidental to all instances of  */
+/* that note in the bar. If propagate_accs is 0, accidental does not */
 /* apply to other notes */
 char note, accidental;
 int mult, octave;
-int propogate_accs;
+int propagate_accs;
 {
   int p;
   char acc;
@@ -1843,19 +3430,187 @@ int propogate_accs;
   acc = accidental;
   mul = mult;
   noteno = (int)note - 'a';
-  if (acc == ' ') {
-    acc = v->workmap[noteno];
-    mul = v->workmul[noteno];
+  if (acc == ' ' && !microtone ) { 
+/* if microtone do not propagate accidentals to this
+   note.
+*/
+    acc = v->workmap[noteno][octave+4];
+    mul = v->workmul[noteno][octave+4];
   } else {
-    if ((retain_accidentals) && (propogate_accs)) {
-      v->workmap[noteno] = acc;
-      v->workmul[noteno] = mul;
+    if ((retain_accidentals) && (propagate_accs)) {
+      v->workmap[noteno][octave+4] = acc;
+      v->workmul[noteno][octave+4] = mul;
     };
   };
   if (acc == '^') p = p + mul;
   if (acc == '_') p = p - mul;
   return p + 12*octave + middle_c;
 }
+
+static int barepitch(note, accidental, mult, octave) 
+/* Computes MIDI pitch ignoring any key signature.
+ * Required for drum track
+ */
+char note, accidental;
+int mult, octave;
+{
+int p,pitch;
+int accidental_size = 1;
+static const char *anoctave = "cdefgab";
+static int scale[7] = {0, 2, 4, 5, 7, 9, 11};
+p = (int) ((long) strchr(anoctave, note) - (long) anoctave);
+p = scale[p];
+if (accidental == '^') p = p + mult*accidental_size;
+if (accidental == '_') p = p - mult*accidental_size;
+pitch = p + 12*octave + middle_c;
+return pitch;
+}
+
+static int pitchof_b(note, accidental, mult, octave, propagate_accs,pitchbend)
+/* computes MIDI pitch for note. If global temperament is set,
+   it will apply a linear temperament and return a
+   pitchbend. If propagate_accs is 1, apply any accidental to all
+   instances of  that note in the bar. If propagate_accs is 0, 
+   accidental does not apply to other notes */
+char note, accidental;
+int mult, octave;
+int propagate_accs;
+int *pitchbend;
+{
+  int p;
+  char acc;
+  int mul, noteno;
+  int pitch4096,pitch,bend;
+  int a,b;
+
+  static int scale[7] = {0, 2, 4, 5, 7, 9, 11};
+  const int accidental_size = sharp_size;  /* [HL] 2015-05-15 - for temperamentlinear and temperamentequal */
+  const int tscale[7] = {
+    0,
+    2*fifth_size-octave_size,
+    4*fifth_size-2*octave_size,
+    -1*fifth_size+octave_size,
+    fifth_size,
+    3*fifth_size-octave_size,
+    5*fifth_size-2*octave_size
+  };
+  static const char *anoctave = "cdefgab";
+
+  acc = accidental;
+  mul = mult;
+  noteno = (int)note - 'a';
+
+  if (acc == ' ' && !microtone) {
+    acc = v->workmap[noteno][octave+4];
+    mul = v->workmul[noteno][octave+4];
+    a = v->workmic[noteno][octave+4].num;   /* 2014-01-26 */
+    b = v->workmic[noteno][octave+4].denom;
+    event_microtone(1,a,b);
+  } else {
+    if ((retain_accidentals) && (propagate_accs)) {
+      v->workmap[noteno][octave+4] = acc;
+      v->workmul[noteno][octave+4] = mul;
+      /* [SS] 2014-01-26 */
+      v->workmic[noteno][octave+4].num   = setmicrotone.num;
+      v->workmic[noteno][octave+4].denom = setmicrotone.denom;
+    };
+  };
+
+  p = (int) ((long) strchr(anoctave, note) - (long) anoctave);
+  if (temperament) {
+    p = tscale[p];
+    if (acc == '^') p = p + mul*accidental_size;
+    if (acc == '_') p = p - mul*accidental_size;
+    pitch4096 =  p + octave*octave_size + middle_c;
+
+    /* [HL] 2015-05-15 */
+    if (microtone) {
+	if (setmicrotone.denom == 100) /* microtone in cents */ 
+	    pitch4096 += (int) (1.0 * setmicrotone.num / setmicrotone.denom * SEMISIZE);
+	else /* microtone relative to sharp step in the current temperament */
+	    pitch4096 += (int) (1.0 * setmicrotone.num / setmicrotone.denom * accidental_size);
+
+	/* needed? */
+	microtone = 0;
+	setmicrotone.num = setmicrotone.denom = 0;
+	active_pitchbend = 8192;
+    }
+ 
+    pitch =  (SEMISIZE*128+pitch4096+SEMISIZE/2)/SEMISIZE-128;
+    bend =  8192+4096*(pitch4096 - pitch*SEMISIZE)/SEMISIZE;
+    bend = bend<0?0:(bend>16383?16383:bend);
+   } else {
+    p = scale[p];
+    if (acc == '^' && !microtone) p = p + mul; /* [SS] 2014-01-20 */
+    if (acc == '_' && !microtone) p = p - mul;
+    pitch = p + 12*octave + middle_c;
+    bend = 8192; /* corresponds to zero bend */
+    }
+if (!microtone) *pitchbend = bend; /* don't override microtone */
+if (comma53) 
+#ifdef MAKAM
+ if (comma53) fprintf(fc53,"%c%d ",note,octave+4);
+#endif
+ if (comma53) convert_to_comma53 (acc,  &pitch, pitchbend); 
+ microtone = 0; /* [SS] 2014-01-25 */
+ setmicrotone.num = 0; /* [SS] 2014-01-25 */
+ setmicrotone.denom = 0;
+return pitch; 
+}
+
+
+
+/* [SS] 2014-01-12  comma53 support: start */
+
+int p48toc53[50];
+
+void init_p48toc53 () {
+int i,c;
+c = 0;
+for (i=0; i< 48; i++) {
+  p48toc53[i] = c;
+/* if black note leave room for extra comma */
+  if (i == 4 || i == 12 || i == 24 || i == 32 || i == 40)
+     c = c+2;
+  else
+     c = c+1;
+  //printf("%d  ",p48toc53[i]);
+  }
+}
+
+void convert_to_comma53 (char acc, int *midipitch, int* midibend) 
+{
+/* The function converts *midipitch, *midibend to the
+   closest comma53 pitch values.
+*/
+float c53factor = 0.22641509;
+float eqtempmidi,bendvalue,c53midi;
+int p48,octave,c53;
+bendvalue = (float) (*midibend - 8192.0)/4096.0;
+eqtempmidi = (float) (*midipitch) + bendvalue;
+octave = (int) (eqtempmidi / 12.0);
+p48 = (int) (eqtempmidi * 4.0) % 48;
+c53 = p48toc53[p48] + 53*octave;
+/* handle b4 or #5 (eg D4b4 or C4#5) in nameAE */
+if (p48 == 4 || p48 == 12 || p48 == 24 || p48 == 32 || p48 == 40)
+   if (bendvalue > 1.1 || bendvalue < -0.8) c53++;
+#ifdef MAKAM
+fprintf(fc53,"%d\n",c53);
+#endif
+
+/*printf("p48 = %d\n c53 = %d\n",p48,c53);*/
+c53midi = (float) c53 * c53factor;
+*midipitch = (int) c53midi;
+bendvalue = c53midi - (float) *midipitch;
+*midibend = 8192 + (int) (bendvalue * 4096);
+}
+
+
+/* [SS] 2014-01-12 */
+
+
+
+
 
 static void doroll(note, octave, n, m, pitch)
 /* applies a roll to a note */
@@ -1866,6 +3621,7 @@ int pitch;
   char up, down;
   int t;
   int upoct, downoct, pitchup, pitchdown;
+  int bend_up,bend_down;
   char *anoctave = "cdefgab";
 
   upoct = octave;
@@ -1875,16 +3631,101 @@ int pitch;
   down = *(anoctave + ((t+6) % 7));
   if (up == 'c') upoct = upoct + 1;
   if (down == 'b') downoct = downoct - 1;
-  pitchup = pitchof(up, v->basemap[(int)up - 'a'], 1, upoct, 0);
-  pitchdown = pitchof(down, v->basemap[(int)down - 'a'], 1, downoct, 0);
+  pitchup = pitchof_b(up, v->basemap[(int)up - 'a'], 1, upoct, 0,&bend_up);
+  pitchdown = pitchof_b(down, v->basemap[(int)down - 'a'], 1, downoct, 0,&bend_down);
+  bentpitch[notes] = active_pitchbend;
   addfeature(NOTE, pitch, n*4, m*(v->default_length)*5);
   marknotestart();
+  bentpitch[notes] = bend_up;
   addfeature(NOTE, pitchup, n*4, m*(v->default_length)*5);
+  bentpitch[notes] = active_pitchbend;
   addfeature(NOTE, pitch, n*4, m*(v->default_length)*5);
+  bentpitch[notes] = bend_down;
   addfeature(NOTE, pitchdown, n*4, m*(v->default_length)*5);
+  bentpitch[notes] = active_pitchbend;
   addfeature(NOTE, pitch, n*4, m*(v->default_length)*5);
   marknoteend();
 }
+
+
+
+/* [SS] 2012-06-30 */
+static void doroll_setup(note,octave,n,m,pitch)
+char note;
+int octave, n, m;
+int pitch;
+{
+  char up, down;
+  int t;
+  int upoct, downoct, pitchup, pitchdown;
+  int bend_up,bend_down;
+  char *anoctave = "cdefgab";
+  struct notestruct *s;
+
+  upoct = octave;
+  downoct = octave;
+  t = (int) ((long) strchr(anoctave, note)  - (long) anoctave);
+  up = *(anoctave + ((t+1) % 7));
+  down = *(anoctave + ((t+6) % 7));
+  if (up == 'c') upoct = upoct + 1;
+  if (down == 'b') downoct = downoct - 1;
+  pitchup = pitchof_b(up, v->basemap[(int)up - 'a'], 1, upoct, 0,&bend_up);
+  pitchdown = pitchof_b(down, v->basemap[(int)down - 'a'], 1, downoct, 0,&bend_down);
+
+  s = (struct notestruct*) checkmalloc(sizeof(struct notestruct));
+  s->pitch = pitch;
+  s->index = notes;
+  s->notetype = ROLL;
+  s->pitchup = pitchup;
+  s->pitchdown = pitchdown;
+  s->bendup = bend_up;
+  s->benddown = bend_down;
+  s->default_length = global.default_length;
+  if (notesdefined < 0 || notesdefined>999)
+      printf("illegal notesdefined = %d\n",notesdefined);
+  noteaddr[notesdefined] = s;
+  if (notesdefined < 1000) notesdefined++;
+}
+
+static void doroll_output(i)
+int i;
+{
+int deco_index;
+int pitch,pitchup,pitchdown,bend_up,bend_down;
+int default_length;
+int n,m;
+int a,b;
+struct notestruct *s;
+deco_index = decotype[i];
+s =  noteaddr[deco_index];
+pitch = s->pitch;
+pitchdown = s->pitchdown;
+pitchup = s->pitchup;
+active_pitchbend = bentpitch[i];
+bend_up =  s->bendup;
+bend_down =  s->benddown;
+default_length = s->default_length;
+n = num[i]*default_length;
+m = denom[i]*4;
+reduce(&n,&m);
+a = n*4;
+b = m*default_length*5;
+reduce(&a,&b);
+replacefeature(NOTE, pitch, a, b,i);
+i++;
+insertfeature(NOTE, pitchup, a, b,i);
+bentpitch[i] = bend_up;
+i++;
+insertfeature(NOTE, pitch, a, b,i);
+bentpitch[i] = active_pitchbend;
+i++;
+insertfeature(NOTE, pitchdown, a, b,i);
+bentpitch[i] = bend_down;
+i++;
+insertfeature(NOTE, pitch, a, b,i);
+bentpitch[i] = active_pitchbend;
+}
+
 
 static void dotrill(note, octave, n, m, pitch)
 /* applies a trill to a note */
@@ -1897,12 +3738,13 @@ int pitch;
   int upoct, pitchup;
   char *anoctave = "cdefgab";
   int a, b, count;
+  int bend;
 
   upoct = octave;
   t = (int) ((long) strchr(anoctave, note)  - (long) anoctave);
   up = *(anoctave + ((t+1) % 7));
   if (up == 'c') upoct = upoct + 1;
-  pitchup = pitchof(up, v->basemap[(int)up - 'a'], 1, upoct, 0);
+  pitchup = pitchof_b(up, v->basemap[(int)up - 'a'], 1, upoct, 0,&bend);
   a = 4;
   b = m*(v->default_length);
   count = n;
@@ -1912,18 +3754,231 @@ int pitch;
   };
   i = 0;
   while (i < count) {
-    if (i == count - 1) {
+    /*if (i == count - 1) {  **bug** [SS] 2006-09-10 */
+     if (i == 0) {
       marknotestart();
     };
     if (i%2 == 0) {
+      bentpitch[notes] = bend;
       addfeature(NOTE, pitchup, a, b);
     } else {
+      bentpitch[notes] = active_pitchbend;
       addfeature(NOTE, pitch, a, b);
     };
     i = i + 1;
   };
   marknoteend();
 }
+
+static void dotrill_setup(note, octave, n, m, pitch)
+char note;
+int octave, n, m;
+int pitch;
+{
+  char up;
+  int t;
+  int upoct, pitchup;
+  char *anoctave = "cdefgab";
+  int bend;
+  struct notestruct *s;
+
+  upoct = octave;
+  t = (int) ((long) strchr(anoctave, note)  - (long) anoctave);
+  up = *(anoctave + ((t+1) % 7));
+  if (up == 'c') upoct = upoct + 1;
+  pitchup = pitchof_b(up, v->basemap[(int)up - 'a'], 1, upoct, 0,&bend);
+  s = (struct notestruct*) checkmalloc(sizeof(struct notestruct));
+  s->pitch = pitch;
+  s->index = notes;
+  s->notetype = TRILL;
+  s->pitchup = pitchup;
+  s->pitchdown = 0;
+  s->default_length = global.default_length;
+  s->bendup = bend;
+  s->benddown = active_pitchbend;
+  if (notesdefined < 0 || notesdefined>999)
+      printf("illegal notesdefined = %d\n",notesdefined);
+  noteaddr[notesdefined] = s;
+  if (notesdefined < 1000) notesdefined++;
+  }
+
+static void dotrill_output(i)
+int i;
+{
+int deco_index;
+int pitch,pitchup,pitchdown;
+int bend;
+int default_length;
+int n,m,a,b;
+int count,j;
+struct notestruct *s;
+deco_index = decotype[i];
+s =  noteaddr[deco_index];
+pitch = s->pitch;
+pitchdown = s->pitchdown;
+pitchup = s->pitchup;
+default_length = s->default_length;
+bend = s->bendup;
+active_pitchbend = s->benddown;
+n = num[i]*default_length;
+m = denom[i]*4;
+reduce(&n,&m);
+removefeature(i);
+  a = 4;
+  b = m*default_length;
+  count = n;
+  while ((tempo*a)/((long)b) > 100000L) {
+    count = count*2;
+    b = b*2;
+  };
+  j = 0;
+reduce(&a,&b);
+  while (j < count) {
+    /*if (i == count - 1) {  **bug** [SS] 2006-09-10 */
+    if (j%2 == 0) {
+      insertfeature(NOTE, pitchup, a, b,i);
+      bentpitch[i] = bend;
+      i++;
+    } else {
+      insertfeature(NOTE, pitch, a, b,i);
+      bentpitch[i] = active_pitchbend;
+      i++;
+    };
+    j = j + 1;
+  };
+}
+
+
+void dump_notestruct () {
+  int i;
+  struct notestruct *s;
+  for (i = 0;i<notesdefined; i++) {
+    s = noteaddr[i];
+    printf("%d ",i);
+    printf("%d ",s->index);
+    printf("%d ",s->notetype);
+    printf("%d ",s->pitch);
+    printf("%d ",s->pitchup);
+    printf("%d\n",s->pitchdown);
+    }
+  } 
+
+/* [SS] 2012-07-03 */
+
+void free_notestructs () {
+int i;
+struct notestruct *s;
+for (i=1;i<notesdefined;i++) {
+  s =  noteaddr[i];
+  free(s);
+  }
+}  
+  
+
+void makecut (mainpitch, shortpitch,mainbend,shortbend, n,m)
+int mainpitch,shortpitch,mainbend,shortbend,n,m;
+{
+addfeature(GRACEON, 0, 0, 0);
+bentpitch[notes] = shortbend;
+addfeature(NOTE, shortpitch, 4,v->default_length);
+addfeature(GRACEOFF, 0, 0, 0);
+bentpitch[notes] = mainbend;
+addfeature(NOTE, mainpitch, 4*n,m*v->default_length);
+}
+
+void makeharproll (pitch, bend,n,m)   /* [JS] 2011-04-29 */
+int pitch,bend,n,m;
+{
+bentpitch[notes] = bend;
+addfeature(NOTE, pitch, 4*n/2,m*2*v->default_length);
+bentpitch[notes] = bend;
+addfeature(NOTE, pitch, 4*n/2,m*2*v->default_length);
+bentpitch[notes] = bend;
+addfeature(NOTE, pitch, 4*n/2,m*v->default_length);
+}
+
+void makeharproll3 (pitch, bend,n,m) /* [JS] 2011-04-29 */
+int pitch,bend,n,m;
+{
+int a=n-1;
+bentpitch[notes] = bend;
+addfeature(NOTE, pitch, 4*(a)/2,m*2*v->default_length);
+bentpitch[notes] = bend;
+addfeature(NOTE, pitch, 4*(a)/2,m*2*v->default_length);
+bentpitch[notes] = bend;
+addfeature(NOTE, pitch, 4*(n/2+1),m*v->default_length);
+}
+
+
+static void doornament(note, octave, n, m, pitch)
+/* applies a roll to a note */
+char note;
+int octave, n, m;
+int pitch;
+{
+  char up, down;
+  int t;
+  int upoct, downoct, pitchup, pitchdown;
+  char *anoctave = "cdefgab";
+  int nnorm,mnorm,nn;
+  int bend_up,bend_down;
+
+  upoct = octave;
+  downoct = octave;
+  t = (int) ((long) strchr(anoctave, note)  - (long) anoctave);
+  up = *(anoctave + ((t+1) % 7));
+  down = *(anoctave + ((t+6) % 7));
+  if (up == 'c') upoct = upoct + 1;
+  if (down == 'b') downoct = downoct - 1;
+  if (harpmode)	/* [JS] 2011-04-29 */
+  {
+	  pitchup=pitch;
+	  pitchdown=pitch;
+	  bend_up=8192;
+	  bend_down=8192;
+  }
+  else
+  {
+	pitchup = pitchof_b(up, v->basemap[(int)up - 'a'], 1, upoct, 0,&bend_up);
+	pitchdown = pitchof_b(down, v->basemap[(int)down - 'a'], 1, downoct, 0,&bend_down);
+  }
+  marknotestart();
+  /* normalize notelength to L:1/8 */
+  /*  nnorm =n*8; [SS] 2008-06-14 */
+  nnorm = n*(v->default_length);
+  mnorm =m*(v->default_length);
+  reduce(&nnorm,&mnorm);
+  if (nnorm == 3 && mnorm == 1) /* dotted quarter note treated differently */
+  {
+	 if (harpmode)  /* [JS] 2011-04-29 */
+	 {
+	   makeharproll3(pitch,active_pitchbend,n,m);
+	 }
+	 else
+	 {
+		 nn = n/3; /* in case L:1/16 or smaller */
+		 if(nn < 1) nn=1;
+		 bentpitch[notes] = active_pitchbend; /* [SS] 2006-11-3 */
+		 addfeature(NOTE, pitch, 4*nn,v->default_length);
+		 makecut(pitch,pitchup,active_pitchbend,bend_up,nn,m);
+		 makecut(pitch,pitchdown,active_pitchbend,bend_down,nn,m);
+	 }
+  }
+  else 
+  {
+	   if (harpmode) /* [JS] 2011-04-29 */
+	   {
+		   makeharproll(pitch,active_pitchbend,n,m);
+	   }
+	   else
+	   {
+		   makecut(pitch,pitchup,active_pitchbend,bend_up,n,m);
+	   }
+  }
+  marknoteend();
+}
+
+
 
 static void hornp(num, denom)
 /* If we have used R:hornpipe, this routine modifies the rhythm by */
@@ -1953,18 +4008,24 @@ int mult;
 char accidental, note;
 int xoctave, n, m;
 {
-  int pitch;
   int num, denom;
   int octave;
+  int pitch;
+  int pitch_noacc;
+  int dummy;
 
+  decotype[notes] = 0; /* [SS] 2012-07-02 no decoration */
+  if (voicesused == 0) bodystarted=1;
   if (v == NULL) {
     event_fatal_error("Internal error - no voice allocated");
   };
+  if (gracenotes && ignore_gracenotes) return; /* [SS] 2010-01-08 */
   octave = xoctave + v->octaveshift;
   num = n;
   denom = m;
   if (v->inchord) v->chordcount = v->chordcount + 1;
-  if (tuplecount > 0) {
+/*  if (tuplecount > 0 && !v->inchord) { [SS] 2008-06-13} */
+  if (tuplecount > 0 ) {
     num = num * tfact_num;
     denom = denom * tfact_denom;
     if (tnote_num == 0) {
@@ -1977,8 +4038,7 @@ int xoctave, n, m;
         };
       };
     };
-    if ((!gracenotes) &&
-        ((!v->inchord) || ((v->inchord) && (v->chordcount == 1)))) {
+    if ((!gracenotes) && (!v->inchord)) {
       tuplecount = tuplecount - 1;
     };
   };
@@ -1990,9 +4050,19 @@ int xoctave, n, m;
   if ((!v->ingrace) && ((!v->inchord)||(v->chordcount==1))) {
     addunits(num, denom*(v->default_length));
   };
-  pitch = pitchof(note, accidental, mult, octave, 1);
-  if (decorators[FERMATA]) {
-    num = num*2;
+
+/* linear temperament support */
+  if (v->drumchannel) pitch = barepitch(note,accidental,mult,octave);
+  else if (nopropagate_accidentals == 1 ) 
+    pitch = pitchof_b(note, accidental, mult, octave, 0,&active_pitchbend);
+  else
+    pitch = pitchof_b(note, accidental, mult, octave, 1,&active_pitchbend);
+#ifndef MAKAM
+  pitch_noacc = pitchof_b(note, 0, 0, octave, 0,&dummy);
+#endif
+  if (decorators[FERMATA] && !ignore_fermata) {
+    if(fermata_fixed) addfract(&num,&denom,1,1);
+    else num = num*2;
   };
   if (v->chordcount == 1) {
     v->chord_num = num*4;
@@ -2001,27 +4071,54 @@ int xoctave, n, m;
   if ((decorators[ROLL]) || (decorators[ORNAMENT]) || (decorators[TRILL])) {
     if (v->inchord) {
       event_error("Rolls and trills not supported in chords");
+      pitchline[notes] = pitch_noacc; /* [SS] 2013-03-26 */
+      bentpitch[notes] = active_pitchbend; /* [SS] 2013-03-26 */
+      addfeature(NOTE, pitch, num*4, denom*2*(v->default_length)); /* [SS] */
     } else {
+      if (easyabcmode) /* [SS] 2011-07-18 */ 
+         addfeature(META,0,lineno,lineposition); /* [SS] 2011-07-18 */
       if (decorators[TRILL]) {
-        dotrill(note, octave, num, denom, pitch);
-      } else { 
-        doroll(note, octave, num, denom, pitch);
+        decotype[notes] = notesdefined; /* [SS] 2012-06-29 */
+        /*dotrill(note, octave, num, denom, pitch);*/
+        dotrill_setup(note, octave, num, denom, pitch);
+        addfeature(NOTE, pitch, num*4, denom*(v->default_length));
+      }
+      else if (decorators[ORNAMENT]) {
+        doornament(note, octave, num, denom, pitch);
+      }
+      else { 
+        decotype[notes] = notesdefined; /* [SS] 2012-06-29 */
+        /*doroll(note, octave, num, denom, pitch);*/
+        doroll_setup(note, octave, num, denom, pitch);
+        bentpitch[notes] = active_pitchbend;
+        addfeature(NOTE, pitch, num*4, denom*(v->default_length));
       };
-    };
-  } else {
-    if (decorators[STACCATO]) {
+     }; /* end of else block for not in chord */
+   } /* end of if block for ROLL,ORNAMENT,TRILL */
+   else {
+    if (decorators[STACCATO] || decorators[BREATH]) {
       if (v->inchord) {
         if (v->chordcount == 1) {
           addfeature(REST, pitch, num*4, denom*(v->default_length));
         };
+	pitchline[notes] = pitch_noacc;
+        bentpitch[notes] = active_pitchbend;
         addfeature(NOTE, pitch, num*4, denom*2*(v->default_length));
       } else {
+	pitchline[notes] = pitch_noacc;
+        if (easyabcmode) /* [SS] 2011-07-18 */ 
+         addfeature(META,0,lineno,lineposition); /* [SS] 2011-07-18 */
+        bentpitch[notes] = active_pitchbend; /* [SS] 2012-05-29 */
         addfeature(NOTE, pitch, num*4, denom*2*(v->default_length));
         marknotestart();
         addfeature(REST, pitch, num*4, denom*2*(v->default_length));
         marknoteend();
       };
     } else {
+      pitchline[notes] = pitch_noacc;
+    if (easyabcmode && !v->inchord) /* [SS] 2011-07-18 */ 
+         addfeature(META,0,lineno,lineposition); /* [SS] 2011-07-18 */
+      bentpitch[notes] = active_pitchbend; /* [SS] 2012-05-29 */
       addfeature(NOTE, pitch, num*4, denom*(v->default_length));
       if (!v->inchord) {
         marknote();
@@ -2031,6 +4128,36 @@ int xoctave, n, m;
       };
     };
   };
+}
+
+
+void event_microtone(int dir, int a, int b)
+{
+int bend;
+/* pitchwheel range +/- 2 semitones according to General MIDI
+specification*/
+/* resolution of 14bit -- order of bytes is inverted for pitchbend */
+setmicrotone.num = dir*a; /* [SS] 2014-01-20 */
+setmicrotone.denom = b;
+if (a == 0) {bend = 8192; /* [SS] 2014-01-19 */
+             microtone = 0; /* [SS] 2014-01-20 */
+             setmicrotone.num = 0; /* [SS] 2014-01-25 */
+             setmicrotone.denom = 0;
+             return;
+            }
+else {
+  bend = dir*((int)(4096.0*a/b + 0.5))+8192; /* [HL] 2015-05-14 */
+  bend = bend<0?0:(bend>16383?16383:bend);
+  }
+active_pitchbend = bend;
+microtone=1;
+}
+
+
+void event_normal_tone()
+{ 
+/* event_specific("MIDI", "pitchbend 0 64"); [SS] 2006-09-30 */
+microtone = 0;
 }
 
 char *get_accidental(place, accidental)
@@ -2071,6 +4198,7 @@ char* s;
     return;
   };
   p = s;
+  if (*p == '(') p = p+1; /* ignore leading ( [SS] 2005-03-19*/
   if ((*p >= 'A') && (*p <= 'G')) {
     note = *p - (int) 'A' + (int) 'a';
     bassnote = 0;
@@ -2083,7 +4211,7 @@ char* s;
     } else {
       /* Experimental feature supports "_ignored words" */
       if (strchr("_^<>@", (int)*p) == NULL) {
-        event_error("Guitar chord does not start with A-G or a-g");
+        if (!silent) event_error("Guitar chord does not start with A-G or a-g");
       };
       return;
     };
@@ -2091,7 +4219,9 @@ char* s;
   p = get_accidental(p, &accidental);
   basepitch = pitchof(note, accidental, 1, 0, 0) - middle_c;
   i = 0;
-  while ((i<9) && (*p != ' ') && (*p != '\0') && (*p != '(') && (*p != '/')) {
+  while ((i<9) && (*p != ' ') && (*p != '\0') && (*p != '(')
+               && (*p != '/') && (*p != ')')) {
+/* also ignore closing parentheses ')'  [SS] 2005-03-19*/
     name[i] = *p;
     i = i+1;
     p = p + 1;
@@ -2099,29 +4229,32 @@ char* s;
   inversion = -1;
   if (*p == '/') {
     p = p + 1;
-    if ((*p < 'A') || (*p > 'G')) {
-      event_error(" / must be followed by A-G in chord");
-    } else {
+    if ((*p >= 'A') && (*p <= 'G')) {
       note = (int)*p - 'A' + 'a';
       p = p + 1;
       p = get_accidental(p, &accidental);
       inversion = pitchof(note, accidental, 1, 0, 0) - middle_c;
+    } else if ((*p >= 'a') && (*p <= 'g')) {
+      note = (int)*p;
+      p = p + 1;
+      p = get_accidental(p, &accidental);
+      inversion = pitchof(note, accidental, 1, 0, 0) - middle_c;
+    } else if (!silent) {
+      event_error(" / must be followed by A-G or a-g in gchord");
     };
   };
   name[i] = '\0';
   chordno = getchordnumber(name);
   if (chordno == 0) {
-    char msg[40];
+    char msg[200];
 
-    sprintf(msg, "Unrecognized chord name \"%s\"", name);
+    /* [SS] 2015-07-08 */
+    sprintf(msg, "Unrecognized chord name \"%s\"\n(Hint: use %%MIDI chordname to define it. eg %%MIDI chordname sus4 0 4 7).", name);
     event_error(msg);
     chordno = 1; /* defaults to major */
   } else {
     /* only record voice as having chords if we recognize chord type */
     v->hasgchords = 1;
-    if ((gchordvoice != 0) && (gchordvoice != v->indexno)) {
-      event_warning("More than one voice with guitar chords in");
-    };
     gchordvoice = v->indexno;
   };
   if (bassnote) {
@@ -2140,6 +4273,7 @@ char* s;
   char* p;
   char* q;
   int done;
+  char midimsg[40];
 
   p = s;
   /* remove any leading spaces */
@@ -2153,6 +4287,8 @@ char* s;
     *q = '\0';
   };
   done = 0;
+/* add nofnop ... */
+if (nofnop == 0) {
   if (strcmp(p, "ppp") == 0) {
     event_specific("MIDI", "beat 30 20 10 1");
     done = 1;
@@ -2185,11 +4321,25 @@ char* s;
     event_specific("MIDI", "beat 127 125 110 1");
     done = 1;
   };
+
+  if ((strcmp(p,"crescendo(") == 0) || (strcmp(p,"<(") == 0) || 
+      (strcmp(p,"crescendo)") == 0) || (strcmp(p,"<)") == 0)) {
+          sprintf(midimsg,"beatmod %d",velocitychange);
+          event_specific("MIDI", midimsg);
+          done = 1;
+   }
+
+  if (
+      (strcmp(p,"diminuendo)") == 0) || (strcmp(p,">)") == 0) || 
+      (strcmp(p,"diminuendo(") == 0) || (strcmp(p,">(") == 0)) {
+          sprintf(midimsg,"beatmod -%d",velocitychange);
+          event_specific("MIDI", midimsg);
+          done = 1;
+   }
+
+}; /* end nofnop */
   if (strcmp(p, "drum") == 0) {
     addfeature(DRUMON, 0, 0, 0);
-    if ((drumvoice != 0) && (drumvoice != v->indexno)) {
-      event_warning("Implementation limit: drums only supported in one voice");
-    };
     drumvoice = v->indexno;
     done = 1;
   };
@@ -2197,7 +4347,46 @@ char* s;
     addfeature(DRUMOFF, 0, 0, 0);
     done = 1;
   };
-  if (done == 0) {
+
+  if (strcmp(s, "fermata") == 0) {
+    decorators_passback[FERMATA] =1;
+    done = 1;
+    };
+
+  if (strcmp(s, "trill") == 0) {
+    decorators_passback[TRILL] =1;
+    done = 1;
+    };
+
+
+  if (strcmp(p, "arpeggio") == 0) {
+    addfeature(ARPEGGIO, 0, 0, 0);
+    done = 1;
+  };
+
+/* [SS] 2011-10-19 */
+  if (strcmp(p, "ped") == 0) {
+    addfeature(PEDAL_ON, 0, 0, 0);
+    done = 1;
+  };
+
+/* [SS] 2011-10-19 */
+  if (strcmp(p, "ped-end") == 0) {
+    addfeature(PEDAL_OFF, 0, 0, 0);
+    done = 1;
+  };
+
+  if (strcmp(s, "breath") == 0) {
+    decorators_passback[BREATH] =1;
+    done = 1;
+    };
+
+ if (strcmp(s, "bend") == 0) {   /* [SS] 2012-12-11 */
+   addfeature(EFFECT, 1, 0, 0);
+   done = 1;
+  };
+
+  if (done == 0 && quiet == -1) {    /* [SS] 2013-11-02 */
     sprintf(buff, "instruction !%s! ignored", s);
     event_warning(buff);
   };
@@ -2231,11 +4420,12 @@ int mult[7];
   if (sf <= -7) map['f'-'a'] = '_';
 }
 
-static void altermap(v, modmap, modmul)
+static void altermap(v, modmap, modmul,modmic)
 /* apply modifiers to a set of accidentals */
 struct voicecontext* v;
 char modmap[7];
 int modmul[7];
+struct fraction modmic[7];
 {
   int i;
 
@@ -2243,6 +4433,9 @@ int modmul[7];
     if (modmap[i] != ' ') {
       v->basemap[i] = modmap[i];
       v->basemul[i] = modmul[i];
+      v->basemic[i].num = modmic[i].num;
+      v->basemic[i].denom = modmic[i].denom;
+      /*printf("basemic[%d] = %d %d\n",i,modmic[i].num,modmic[i].denom);*/
     };
   };
 }
@@ -2251,12 +4444,17 @@ static void copymap(v)
 /* sets up working map at the start of each bar */
 struct voicecontext* v;
 {
-  int j;
+  int i,j;
 
-  for (j=0; j<7; j++) {
-    v->workmap[j] = v->basemap[j];
-    v->workmul[j] = v->basemul[j];
-  };
+  for (i=0; i<7; i++) {
+    for (j=0;j<10;j++) {
+      v->workmap[i][j] = v->basemap[i];
+      v->workmul[i][j] = v->basemul[i];
+    /* [SS] 2014-01-26 */
+      v->workmic[i][j].num = v->basemic[i].num;
+      v->workmic[i][j].denom = v->basemic[i].denom;
+      }
+   };
 }
 
 /* workaround for problems with PCC compiler */
@@ -2268,32 +4466,57 @@ char c;
   return (putc(c,fp));
 }
 
-static void addfract(xnum, xdenom, a, b)
+void addfract(int *xnum, int *xdenom, int a, int b)
 /* add a/b to the count of units in the bar */
-int *xnum;
-int *xdenom;
-int a, b;
 {
   *xnum = (*xnum)*b + a*(*xdenom);
   *xdenom = (*xdenom) * b;
+  if (*xnum < 0 && *xdenom < 0) {*xnum = -*xnum; *xdenom = -*xdenom;}
   reduce(xnum, xdenom);
 }
 
-static void dotie(j, xinchord)
+void nondestructive_readstr(out, in, limit)
+char out[];
+char **in;
+int limit;
+/* copy across alphanumeric string */
+{
+  int i;
+  i = 0;
+  while ((isalpha(*(*in+i))) && (i < limit-1)) {
+    out[i] = *(*in+i);
+    i = i + 1;
+  };
+  out[i] = '\0';
+}
+
+
+static void dotie(j, xinchord,voiceno)
 /* called in preprocessing stage to handle ties */
-int j, xinchord;
+/* we need the voiceno in case a tie is broken by a */
+/* voice switch.                                    */
+int j, xinchord,voiceno;
 {
   int tienote, place;
   int tietodo, done;
+  int newbar;
   int lastnote, lasttie;
   int inchord;
   int tied_num, tied_denom;
+  int localvoiceno;
+  int samechord;
+  char command[40];
 
   /* find note to be tied */
+  samechord = 0;
+  newbar =0;  /* if 1 it allows pitchline[] == pitchline[] test */
+  if (xinchord) samechord = 1;
   tienote = j;
+  localvoiceno = voiceno;
   while ((tienote > 0) && (feature[tienote] != NOTE) &&
          (feature[tienote] != REST)) {
     tienote = tienote - 1;
+    if (feature[tienote] == VOICE) break; /* [SS] 2010-01-15 */
   };
   if (feature[tienote] != NOTE) {
     event_error("Cannot find note before tie");
@@ -2302,6 +4525,27 @@ int j, xinchord;
     /* change NOTE + TIE to TNOTE + REST */
     feature[tienote] = TNOTE;
     feature[j] = REST;
+
+/* fix for tied microtone note */
+    if (feature[tienote+1] == DYNAMIC) { 
+      nondestructive_readstr(command, &atext[pitch[tienote+1]], 40);
+      if (strcmp(command, "pitchbend") == 0) {
+        /*printf("need to remove pitchbend following TNOTE\n"); */
+        removefeature(tienote+1);
+        j = j-1;
+        }
+    }
+
+/* fix for tied microtone note inside a slur */
+    if (feature[tienote+1] == SLUR_TIE && feature[tienote+2] == DYNAMIC) {
+      nondestructive_readstr(command, &atext[pitch[tienote+2]], 40);
+      if (strcmp(command, "pitchbend") == 0) {
+        /*printf("need to remove pitchbend following TNOTE in slur\n"); */
+        removefeature(tienote+2);
+        j = j-1;
+        }
+    }
+
     num[j] = num[tienote];
     denom[j] = denom[tienote];
     place = j;
@@ -2312,18 +4556,30 @@ int j, xinchord;
     lastnote = -1;
     done = 0;
     while ((place < notes) && (tied_num >=0) && (done == 0)) {
+      /*printf("%d %s   %d %d/%d ",place,featname[feature[place]],pitch[place],num[place],denom[place]); */
       switch (feature[place]) {
+        case SINGLE_BAR:
+        case BAR_REP:
+        case REP_BAR:
+        case DOUBLE_BAR: /* [SS] 2011-09-13 */
+          if (tietodo) newbar = 1;
+          else newbar=0;
+          break; 
         case NOTE:
+          if(localvoiceno != voiceno) break;
           lastnote = place;
           if ((tied_num == 0) && (tietodo == 0)) {
             done = 1;
           };
-          if ((pitch[place] == pitch[tienote]) && (tietodo == 1)) {
+          if (((pitchline[place] == pitchline[tienote] && newbar) || (pitch[place] == pitch[tienote]))
+             && (tietodo == 1) && (samechord == 0)) {
             /* tie in note */
             if (tied_num != 0) {
               event_error("Time mismatch at tie");
             };
             tietodo = 0;
+	    pitch[place] = pitch[tienote]; /* in case accidentals did not
+					      propagate                   */
             /* add time to tied time */
             addfract(&tied_num, &tied_denom, num[place], denom[place]);
             /* add time to tied note */
@@ -2341,6 +4597,7 @@ int j, xinchord;
           };
           break;
         case REST:
+          if(localvoiceno != voiceno) break;
           if ((tied_num == 0) && (tietodo == 0)) {
             done = 1;
           };
@@ -2350,62 +4607,123 @@ int j, xinchord;
           };
           break;
         case TIE:
+          if(localvoiceno != voiceno) break;
           if (lastnote == -1) {
             event_error("Bad tie: possibly two ties in a row");
           } else {
-            if (pitch[lastnote] == pitch[tienote]) {
+            if (pitch[lastnote] == pitch[tienote] && samechord == 0) {
               lasttie = place;
               tietodo = 1;
+              if (inchord) samechord = 1;
             };
           };
           break;
         case CHORDON:
+          if(localvoiceno != voiceno) break;
           inchord = 1;
           break;
         case CHORDOFF:
+        case CHORDOFFEX:
+          samechord = 0;
+          if(localvoiceno != voiceno) break;
           inchord = 0;
           /* subtract time from tied time */
           addfract(&tied_num, &tied_denom, -num[place], denom[place]);
           break;
+        case VOICE:
+          localvoiceno = pitch[place];
         default:
           break;
       };
+      /*printf("tied_num = %d done = %d inchord = %d\n",tied_num, done, inchord);*/
       place = place + 1;
     };
-    if (tietodo == 1) {
+    if (tietodo == 1 && !silent) {
       event_error("Could not find note to be tied");
     };
   };
+/*if (verbose > 3) printf("dotie finished\n"); */
 }
 
+static void fix_enclosed_note_lengths(int from, int end) 
+{
+/* in event that the chord length was set outside [], */
+/* we must go back and adjust the note length of each note */
+/* inside the chord.                                   */
+
+int j;
+if (apply_fermata_to_chord && !ignore_fermata)   /* [SS] 2012-03-26 */
+    {
+    if (fermata_fixed) addfract(&num[end],&denom[end],1,1);
+    else num[end] *= 2;
+    }
+for (j = from; j < end; j++)
+  {
+  /* [SS] 2015-04-17 also include REST which occurs in STACCATO CHORD */
+  if (feature[j] == NOTE || feature[j] == TNOTE || feature[j] == REST) 
+    {
+      num[j] = num[end];
+      denom[j] =denom[end]; 
+    }
+  }
+apply_fermata_to_chord = 0;
+}
+
+
+static int patchup_chordtie(int chordstart,int chordend)
+{
+int i,tieloc;
+for (i=chordend;i>=chordstart;i--) {
+	if(feature[i]==NOTE && feature[i+1] != TIE) {
+             insertfeature(TIE,0,0,0,i+1);
+	     tieloc = i+1;
+	}
+     }
+ return tieloc;
+}
+
+
 static void tiefix()
-/* connect up tied notes */
+/* connect up tied notes and cleans up the */
+/* note lengths in the chords (eg [ace]3 ) */
 {
   int j;
   int inchord;
   int chord_num, chord_denom;
+  int chord_start,chord_end;
+  int voiceno;
 
   j = 0;
   inchord = 0;
+  voiceno = 1;
   while (j<notes) {
     switch (feature[j]) {
     case CHORDON:
       inchord = 1;
       chord_num = -1;
+      chord_start = j;
+      j = j + 1;
+      break;
+    case CHORDOFFEX:
+      inchord = 0;
+      chord_end=j;
       j = j + 1;
       break;
     case CHORDOFF:
       if (!((!inchord) || (chord_num == -1))) {
-        num[j] = chord_num;
-        denom[j] = chord_denom;
+        num[j] = chord_num; 
+        denom[j] = chord_denom; 
       };
       inchord = 0;
+      chord_end=j;
       j = j + 1;
       break;
     case NOTE:
       if ((inchord) && (chord_num == -1)) {
         chord_num = num[j];
         chord_denom = denom[j];
+        /* use note length in num,denom as chord length */
+        /* if chord length is not set outside []        */
       };
       j = j + 1;
       break;
@@ -2417,23 +4735,43 @@ static void tiefix()
       j = j + 1;
       break;
     case TIE:
-      dotie(j, inchord);
+      dotie(j, inchord,voiceno);
       j = j + 1;
       break;
     case LINENUM:
       lineno = pitch[j];
       j = j + 1;
       break;
+    case VOICE:
+      voiceno = pitch[j];
     default:
       j = j + 1;
       break;
     };
   };
+if (verbose >3) printf("tiefix finished\n");
 }
+
+static void applygrace_orig(int);
+static void applygrace_new(int);
 
 static void applygrace(place)
 int place;
+{
+if (gfact_method)  applygrace_orig(place); 
+else applygrace_new(place);
+}
+
+
+static void applygrace_orig(place)
+int place;
 /* assign lengths to grace notes before generating MIDI */
+/* This version adjusts the length of the grace notes
+ * based on the length of the following note, the
+ * number of the notes in the group of grace notes
+ * and the desired fraction, gfact_num/gfact_denom.
+ * This does not sound very natural.
+ */
 {
   int start, end, p;
   int next_num, next_denom;
@@ -2483,8 +4821,9 @@ int place;
   hostnoteend = -1;
   if (nextinchord) {
     while ((hostnoteend == -1) && (j < notes)) {
-      if (feature[j] == CHORDOFF) {
-        hostnotestart = j;
+      if (feature[j] == CHORDOFF || feature[j] == CHORDOFFEX) {
+        /*hostnoteend = j-1; [SS] 2009-10-27 */
+        hostnoteend = j;
       };
       j = j + 1;
     };
@@ -2510,7 +4849,7 @@ int place;
     p = hostnotestart;
     while (p <= hostnoteend) {
       if ((feature[p] == NOTE) || (feature[p] == REST) || 
-          (feature[p] == CHORDOFF)) {
+          (feature[p] == CHORDOFF) || (feature[p] == CHORDOFFEX)) {
         next_num = num[p];
         next_denom = denom[p];
         num[p] = num[p] * (gfact_denom - gfact_num);
@@ -2531,6 +4870,137 @@ int place;
   };
 }
 
+
+static void applygrace_new(place)
+int place;
+/* assign lengths to grace notes before generating MIDI */
+/* In this version each grace note has a predetermined
+ * length, eg, (1/64 th note) and the total length of
+ * the group of grace notes is stolen from the following
+ * note. If the length of the following note is not
+ * long enough to accommodate the group of grace notes,
+ * then all the grace notes are given a length of 0.
+ */
+{
+  int start, end, p;
+  int fact_num, fact_denom;
+  int grace_num, grace_denom;
+  int j;
+  int nextinchord;
+  int hostnotestart, hostnoteend;
+  int  adjusted_num, adjusted_den;
+
+  j = place;
+  start = -1;
+  while ((j < notes) && (start == -1)) {
+    if (feature[j] == GRACEON) {
+      start = j;
+    };
+    if (feature[j] == GRACEOFF) {
+      event_error("} with no matching {");
+    };
+    j = j + 1;
+  };
+  /* now find end of grace notes */
+  end = -1;
+  while ((j < notes) && (end == -1)) {
+    if (feature[j] == GRACEOFF) {
+      end = j;
+    };
+    if ((feature[j] == GRACEON) && (j != start - 1)) {
+      event_error("nested { not allowed");
+    };
+    j = j + 1;
+  };
+  /* now find following note */
+  nextinchord = 0;
+  hostnotestart = -1;
+  while ((hostnotestart == -1) && (j < notes)) {
+    if ((feature[j] == NOTE) || (feature[j] == REST)) {
+      hostnotestart = j;
+    };
+    if (feature[j] == GRACEON) {
+      event_error("Intervening note needed between grace notes");
+    };
+    if (feature[j] == CHORDON) {
+      nextinchord = 1;
+    };
+    j = j + 1;
+  };
+  hostnoteend = -1;
+  if (nextinchord) {
+    while ((hostnoteend == -1) && (j < notes)) {
+      if (feature[j] == CHORDOFF || feature[j] == CHORDOFFEX) {
+      /*  hostnoteend = j-1;  [SS] 2009-10-27 */
+      hostnoteend = j;
+      };
+      j = j + 1;
+    };
+  } else {
+    hostnoteend = hostnotestart;
+  };
+  if (hostnotestart == -1) {
+    event_error("No note found to follow grace notes");
+  } else {
+    /* count up grace units */
+    grace_num = 0;
+    grace_denom = 1;
+    p = start;
+    while (p <= end) {
+      if ((feature[p] == NOTE) || (feature[p] == REST)) {
+        grace_num = grace_num * denom[p] + grace_denom * num[p];
+        grace_denom = grace_denom * denom[p];
+        reduce(&grace_num, &grace_denom);
+      };
+      p = p + 1;
+    };
+
+/* new stuff starts here [SS] 2004/06/11 */
+
+/* is the following note long enough */
+   p = hostnotestart;
+   adjusted_num = num[p]*grace_denom*gfact_denom - denom[p]*grace_num;
+   adjusted_den = denom[p]*grace_denom*gfact_denom;
+   /* if (adjusted_den <=0.0)  not long enough [SS] 2014-10-09 */
+   if (adjusted_num <=0.0) /* not long enough [SS] 2014-10-09 */
+      {
+      p = start;
+      removefeatures(start,end); /* [SS] 2014-11-09 */
+      /*while (p <= end)
+       * { 
+       * lenmul(p,0,1);
+       * p = p+1;
+	} */
+      if (quiet == -1) event_warning("Grace sequence exceeds host note. Grace sequence cut off.");
+      return;
+      }
+
+    /* adjust host note or notes */
+    p = hostnotestart;
+    while (p <= hostnoteend) {
+      if ((feature[p] == NOTE) || (feature[p] == REST) || 
+          (feature[p] == CHORDOFF) || (feature[p] == CHORDOFFEX)) {
+        num[p] = adjusted_num;
+        denom[p] = adjusted_den;
+        reduce(&num[p], &denom[p]);
+      };
+      p = p + 1;
+    };
+
+    fact_num = 1;
+    fact_denom =gfact_denom;
+    reduce(&fact_num, &fact_denom);
+    /* adjust length of grace notes */
+    p = start;
+    while (p <= end) {
+      lenmul(p, fact_num, fact_denom);
+      p = p + 1;
+    }
+  };
+}
+
+
+
 static void dograce()
 /* assign lengths to grace notes before generating MIDI */
 {
@@ -2542,7 +5012,8 @@ static void dograce()
       applygrace(j);
     };
     if (feature[j] == SETGRACE) {
-      gfact_num = pitch[j];
+      gfact_method = pitch[j];
+      gfact_num =  num[j];
       gfact_denom = denom[j];
     };
     if (feature[j] == LINENUM) {
@@ -2550,6 +5021,7 @@ static void dograce()
     };
     j = j + 1;
   };
+if (verbose >3) printf("dograce finished\n");
 }
 
 static void zerobar()
@@ -2561,20 +5033,28 @@ static void zerobar()
 
 void event_bar(type, replist)
 /* handles bar lines of various types in the abc */
+/* This function was reorganized on 2013-12-02 [SS] to 
+   handle play on repeats when there are split voices.
+*/
 int type;
 char* replist;
 {
   int newtype;
+  int depth;
+  int voiceno, indexno;
+
+  depth = splitdepth;
+  /* [SS] 2015-03-25 */
+  if (splitdepth > 0 && extended_overlay_running == 0) {
+  /* we encountered the repeat while in a split voice;
+     first recurse back to the original voice.
+  */
+  recurse_back_to_original_voice();
+  }
 
   newtype = type;
   if ((type == THIN_THICK) || (type == THICK_THIN)) {
     newtype = DOUBLE_BAR;
-  };
-  if (type == BAR1) {
-    newtype = SINGLE_BAR;
-  };
-  if (type == REP_BAR2) {
-    newtype = REP_BAR;
   };
   addfeature(newtype, 0, 0, 0);
   copymap(v);
@@ -2582,38 +5062,34 @@ char* replist;
   if (strlen(replist) > 0) {
     event_playonrep(replist);
   };
-/*
-  if (type == BAR1) {
-    addfeature(PLAY_ON_REP, 0, 0, 1);
-  };
-  if (type == REP_BAR2) {
-    addfeature(PLAY_ON_REP, 0, 0, 2);
-  };
+
+/* If there are any split voices (voice overlays),  we need to
+   put repeat symbol in all the split voices. This is all done
+   by sync_voice() [SS] 2013-12-02.
 */
+ {
+ voiceno = v->voiceno;
+ indexno = v->indexno;
+ if (extended_overlay_running) return;
+ /* [SS] 2015-03-25 */
+ while (v->tosplitno != -1)
+     { 
+      v = getvoicecontext(v->tosplitno);
+      splitdepth++;
+      addfeature(VOICE, v->indexno, 0, 0);
+      sync_voice (v,0,0);
+     }
+ if (v->fromsplitno != -1 || splitdepth >0) recurse_back_to_original_voice();
+ }
 }
 
-static void delendrep(j)
-int j;
-/* remove bogus repeat */
-{
-  event_error("spurious repeat after second ending");
-  switch(feature[j]) {
-  case REP_BAR:
-    feature[j] = DOUBLE_BAR;
-    break;
-  case DOUBLE_REP:
-    feature[j] = BAR_REP;
-    break;
-  default:
-    break;
-  };
-}
+
 
 static void placeendrep(j)
 /* patch up missing repeat */
 int j;
 {
-  event_warning("Assuming repeat");
+  if (quiet == -1) event_warning("Assuming repeat");
   switch(feature[j]) {
   case DOUBLE_BAR:
     feature[j] = REP_BAR;
@@ -2623,6 +5099,7 @@ int j;
     break;
   case BAR_REP:
     feature[j] = DOUBLE_REP;
+    event_warning("replacing with double repeat (::)");
     break;
   default:
     event_error("Internal error - please report");
@@ -2634,7 +5111,7 @@ static void placestartrep(j)
 /* patch up missing repeat */
 int j;
 {
-  event_warning("Assuming repeat");
+  if (quiet == -1) event_warning("Assuming repeat");
   switch(feature[j]) {
   case DOUBLE_BAR:
     feature[j] = BAR_REP;
@@ -2643,13 +5120,14 @@ int j;
     feature[j] = BAR_REP;
     break;
   case REP_BAR:
+    if (quiet == -1) event_warning("replacing |: with double repeat (::)");
     feature[j] = DOUBLE_REP;
     break;
   case BAR_REP:
-    event_error("Too many end repeats");
+    if (quiet == -1) event_error("Too many end repeats");
     break;
   case DOUBLE_REP:
-    event_error("Too many end repeats");
+    if (quiet == -1) event_error("Too many end repeats");
     break;
   default:
     event_error("Internal error - please report");
@@ -2664,85 +5142,59 @@ static void fixreps()
 {
   int j;
   int rep_point; /* where to assume a repeat starts */
-  int expect_repeat;
-  int expect_norepeat;
-  int use_next;
+  int expect_repeat;   /* = 1 after |: or ::  otherwise 0*/
+  int use_next; /* if 1 set next bar line as ref_point */
+  int nplays; /* counts PLAY_ON_REP associated with a BAR_REP*/
 
-  expect_repeat = 0;
-  expect_norepeat = 0;
+  expect_repeat = 0; 
   use_next = 0;
+  nplays=0;
   j = 0;
   while (j < notes) {
     switch(feature[j]) {
-    case SINGLE_BAR:
+    case SINGLE_BAR:           /*  |  */
       if (use_next) {
         rep_point = j;
         use_next = 0;
       };
       break;
-    case DOUBLE_BAR:
+    case DOUBLE_BAR:           /*  || */
       rep_point = j;
       use_next = 0;
       break;
-    case BAR_REP:
+    case BAR_REP:              /* |:  */
+/* if |:  .. |: encountered. Report error and change second |: to :: */
       if (expect_repeat) {
-        event_error("|: found when end repeat expected");
-        placeendrep(j);
+          if (quiet == -1) event_error(" found another |: after a |:");
+          placeendrep(j);
       };
       expect_repeat = 1;
-      expect_norepeat = 0;
       use_next = 0;
       break;
-    case REP_BAR:
-      if (expect_norepeat) {
-        delendrep(j);
-      } else {
-        if (!expect_repeat) {
+    case REP_BAR:                /* :| */
+/* if :| encountered before |: place  "|:" at reference point */
+       if ((!expect_repeat) && (nplays < 1)) {
           placestartrep(rep_point);
         };
-      };
-      expect_repeat = 0;
-      expect_norepeat = 0;
+      expect_repeat = 0; 
       rep_point = j;
       use_next = 0;
       break;
-    case PLAY_ON_REP:
-      if (denom[j] == 1) {
-        /* case REP1: */
-        if (!expect_repeat) {
-          placestartrep(rep_point);
-        };
-        expect_repeat = 1;
-        expect_norepeat = 0;
-        break;
-      };
-      if (denom[j] == 2) {
-        /* case REP2: */
-        if (expect_repeat) {
-          event_error("require :|2 for second ending");
-        };
-        expect_repeat = 0;
-        expect_norepeat = 1;
-        break;
-      };
-    case REP_BAR2:
-      /* cannot happen! */
+
+    case PLAY_ON_REP:         /*  [1 or [2 or [1,3 etc  */
+       if(nplays == 0 && !expect_repeat) {
+           if (quiet == -1) event_error(" found [1 or like before |:");
+           placestartrep(rep_point);
+           }
+       nplays++;
+       break;
+
+    case DOUBLE_REP:           /*  ::  */
       if (!expect_repeat) {
-        placestartrep(rep_point);
-      };
-      expect_repeat = 0;
-      use_next = 1;
-      break;
-    case DOUBLE_REP:
-      if (expect_norepeat) {
-        delendrep(j);
-      } else {
-        if (!expect_repeat) {
+          if (quiet == -1) event_error(" found :: before |:");
           placestartrep(rep_point);
-        };
-      };
+       };
       expect_repeat = 1;
-      expect_norepeat = 0;
       break;
     default:
       break;
@@ -2750,6 +5202,166 @@ static void fixreps()
     j = j + 1;
   };
 }
+
+
+/* Barfly stress model support functions */
+
+extern int segnum,segden; /* from genmidi.c */
+extern int ngain[32];
+extern int beatmodel;
+/* [SS] 2011-08-17 */
+void fdursum_at_segment(int segposnum, int segposden, int *val_num, int *val_den);
+
+/* [SS] 2011-08-17 */
+void beat_modifier (int i)
+/* modifies the note durations inside a beat using Phil Taylor's model */
+{
+  int start_num,start_denom,startseg_num,startseg_denom;
+  int segnumber;
+  int end_num,end_denom,endseg_num,endseg_denom;
+  int mstart_num,mstart_denom,mend_num,mend_denom;
+  int delta_num,delta_denom;
+/* start_num/start_denom is the original position of the note onset
+ * end_num/end_denom is the original position of the end of the note
+ * mstart_num/mstart_denom is the modified position of the note onset
+ * mend_num/mend_denom is the modified position of the note end
+ * startseg_num/startseg_denom is the position of the note onset in
+ * segment units. eg. if a note starts in the middle of segment 1,
+ * its value would be 3/2 (assuming we are counting from 0).
+ */
+  int inchord,notecount;
+  notecount=0;
+  inchord = 0;
+  start_num=0;
+  start_denom = 1;
+  end_num=start_num;
+  end_denom = start_denom;
+  i++;
+  while (feature[i] != SINGLE_BAR) {
+    if (feature[i] == DOUBLE_BAR ||
+        feature[i] == BAR_REP ||
+        feature[i] == DOUBLE_REP ||
+        feature[i] == REP_BAR) break;
+    if (feature[i] == CHORDON) {
+                               inchord = 1;
+                               notecount = 0;
+                               i++;
+                               continue;
+                               }
+    if (feature[i] == CHORDOFF ||
+        feature[i] == CHORDOFFEX) {
+                               inchord = 0;
+                               notecount = 0;
+                               start_num = end_num;
+                               start_denom = end_denom;
+                               i++;
+                               continue;
+                               }
+    if (feature[i] == NOTE || feature[i] == TNOTE ||
+        (feature[i] == REST && pitch[i] ==0)) {
+/* Care is needed for tied notes; they appear as TNOTE followed by*/
+/* two REST. We want to ignore those two rests.*/
+/* if REST and pitch[i] != 0 it is a tied note converted to a rest */
+/* Hopefully we do not encounter tied rests. */
+       if (notecount == 0) {
+         addfract(&end_num,&end_denom,num[i],denom[i]);
+         reduce(&end_num, &end_denom);
+   /* Convert note positions to where they would map to after applying
+      the duration modifiers. We map the positions to segment units and then
+      transform them back to note units using the modified space fdursum.
+      Since all units of time are represented as fractions, the operations
+      are less transparent.
+   */
+   /* divide start_num/start_denom by segnum/segden */
+   /* (divide note duration by 4 because they are 4 times larger in num/denom*/
+         startseg_num = start_num*segden;
+         startseg_denom = start_denom*segnum*4;
+         reduce(&startseg_num,&startseg_denom);
+   /* repeat for end_num and end_denom; */
+         endseg_num = end_num*segden;
+         endseg_denom = end_denom*segnum*4;
+         reduce(&endseg_num,&endseg_denom);
+         fdursum_at_segment(startseg_num,startseg_denom, &mstart_num, &mstart_denom);
+         fdursum_at_segment(endseg_num,endseg_denom, &mend_num, &mend_denom);
+   /*  now compute the new note length */
+         delta_num = mend_num;
+         delta_denom = mend_denom;
+         addfract(&delta_num,&delta_denom,-mstart_num,mstart_denom);
+         reduce(&delta_num,&delta_denom);
+         if (inchord) notecount++;
+         }
+       if (verbose > 1) {
+       printf("pitch %d from = %d/%d (%d/%d) to %d/%d (%d/%d) becomes %d/%d %d/%d",pitch[i],
+start_num,start_denom,startseg_num,startseg_denom,end_num,end_denom,
+endseg_num,endseg_denom,mstart_num,mstart_denom,mend_num,mend_denom);
+       printf(" - %d/%d\n",delta_num,delta_denom);
+       }
+       num[i] = delta_num; 
+       denom[i] = delta_denom;
+       segnumber = startseg_num/startseg_denom; /* [SS] 2011-08-17 */
+       stressvelocity[i] = ngain[segnumber];
+         
+       if (notecount == 0) {start_num = end_num;
+                            start_denom = end_denom;}
+       if (feature[i] == TNOTE) i++; /*skip following rest */
+       }
+    i++;
+    }
+}
+
+/* [SS] 2011-08-24 */
+static void apply_bf_stress_factors () {
+  int j;
+  char command[40];
+  char inputfile[64];
+  char *p;
+  int barnumber;
+  load_stress_parameters(rhythmdesignator);
+  if (verbose)
+  printf("beat_modifer using segment size %d/%d\n",segnum,segden);
+  j = 0;
+  barnumber = 0;
+  while (j < notes) {
+   switch(feature[j]) {
+    case SINGLE_BAR:           /*  |  */
+    case DOUBLE_BAR:           /*  || */
+    case BAR_REP:              /*  |: */
+    case REP_BAR:              /*  :| */
+    case DOUBLE_REP:           /*  :: */
+      barnumber++;
+      if (verbose>1) printf("bar %d\n",barnumber);
+      if (beatmodel == 2) beat_modifier(j);
+    break;
+    case DYNAMIC:
+       p = atext[pitch[j]];
+       skipspace(&p);
+       readstr(command, &p, 40);
+       if (strcmp(command, "stressmodel") == 0) {
+          skipspace(&p);
+          beatmodel = readnump(&p); /* [SS] 2011-08-23 */
+          stressmodel=beatmodel;
+          if (verbose) printf("%s %d\n",command,beatmodel);
+          if (beatmodel == 1)
+             return; /* do not apply beat_modifier */
+         }
+       if (strcmp(command, "ptstress") == 0) {
+          skipspace(&p);
+          strncpy(inputfile,p,60);
+          if (verbose) printf("ptstress file = %s\n",inputfile);
+          if (parse_stress_params (inputfile) == -1) readstressfile (inputfile);
+          calculate_stress_parameters();
+          beatmodel = 2;
+          if (stressmodel !=0 && beatmodel != stressmodel) beatmodel = stressmodel;
+         }
+       break;
+    default:
+      break;
+    }
+  j = j+1;
+  }
+}
+
+
 
 static void startfile()
 /* called at the beginning of an abc tune by event_refno */
@@ -2766,8 +5378,10 @@ static void startfile()
   setmap(0, global.basemap, global.basemul);
   copymap(&global);
   global.octaveshift = 0;
+  global.keyset = 0;
   voicecount = 0;
   head = NULL;
+  for (j=0;j<64;j++) vaddr[j]=NULL; 
   v = NULL;
   got_titlename = 0;
   time_num = 4;
@@ -2777,37 +5391,46 @@ static void startfile()
   timesigset = 0;
   barchecking = 1;
   global.default_length = -1;
-  event_tempo(120, 1, 4, 0, NULL, NULL);
+  event_tempo(default_tempo, 1, 4, 0, NULL, NULL);
   notes = 0;
   ntexts = 0;
   gfact_num = 1;
-  gfact_denom = 3;
-  global_transpose = 0;
+  gfact_denom = 4;
   hornpipe = 0;
   karaoke = 0;
-  retain_accidentals = 1;
-  ratio_a = 2;
-  ratio_b = 4;
+  numsplits = 0;
+  splitdepth = 0; /* [SS] 2010-02-07 */
+  v1index = -1; /* [SS] 2010-02-07 */
+  retain_accidentals = default_retain_accidentals;
+  fermata_fixed = default_fermata_fixed;
+  if (ratio_standard == -1) {
+    ratio_a = default_ratio_a;
+    ratio_b = default_ratio_b;
+  } else {
+     ratio_a = 2;
+     ratio_b = 6;
+   }
   wcount = 0;
   parts = -1;
-  middle_c = 60;
+  middle_c = default_middle_c;
+  temperament=0;
   for (j=0; j<26; j++) {
     part_start[j] = -1;
   };
   headerpartlabel = 0;
-  additive = 1;
   initvstring(&part);
   for (j=0; j<16;j++) {
-    channels[j] = 0;
+    channel_in_use[j] = 0;
   };
-  set_gchords("z");
+  set_gchords("x"); /* [SS] 2010-07-11 */
   gchordvoice = 0;
   set_drums("z");
   drumvoice = 0;
   wordvoice = 0;
+  notesdefined = 1; /* [SS] 2012-07-02 */
 }
 
-static void setbeat()
+void setbeat()
 /* default accompaniment patterns for various time signatures */
 {
   /* set up chord/fundamental sequence if not already set */
@@ -2826,6 +5449,9 @@ static void setbeat()
   if ((time_num == 9) && (time_denom == 8)) {
     set_gchords("fzcfzcfzc");
   };
+  if ((time_num == 12) && (time_denom == 8)) {
+    set_gchords("fzcfzcfzcfzc");
+  };
 }
 
 static void headerprocess()
@@ -2833,12 +5459,13 @@ static void headerprocess()
 /* the header and the start of the tune */
 {
   int t_num, t_denom;
+  struct voicecontext *p;
 
   if (headerpartlabel == 1) {
     part_start[(int)part.st[0] - (int)'A'] = notes;
     addfeature(PART, part.st[0], 0, 0);
   };
-  addfeature(DOUBLE_BAR, 0, 0, 0);
+  /* addfeature(DOUBLE_BAR, 0, 0, 0); [SS] 2014-10-29 */
   pastheader = 1;
 
   gracenotes = 0; /* not in a grace notes section */
@@ -2853,6 +5480,13 @@ static void headerprocess()
       global.default_length = 8;
     };
   };
+/* ensure default_length is defined for all voices */
+  p = head;
+  while ((p != NULL)) {
+    if (p->default_length == -1) p->default_length=global.default_length;
+    p = p->next;
+  };
+
   bar_num = 0;
   bar_denom = 1;
   set_meter(time_num, time_denom);
@@ -2867,26 +5501,30 @@ static void headerprocess()
   /* make tempo in terms of 1/4 notes */
   tempo = (long) 60*1000000*t_denom/(Qtempo*4*t_num);
   div_factor = division;
-  setbeat();
   voicesused = 0;
 }
 
-void event_key(sharps, s, minor, modmap, modmul, gotkey, gotclef, clefname,
-          octave, transpose, gotoctave, gottranspose)
+void event_key(sharps, s, modeindex, modmap, modmul, modmicrotone, gotkey, gotclef, clefname,
+          octave, transpose, gotoctave, gottranspose, explict)
 /* handles a K: field */
 int sharps; /* sharps is number of sharps in key signature */
-int minor; /* a boolean 0 or 1 */
+int modeindex; /* 0 major, 1,2,3 minor, 4 locrian, etc.  */
 char *s; /* original string following K: */
 char modmap[7]; /* array of accidentals to be applied */
 int  modmul[7]; /* array giving multiplicity of each accent (1 or 2) */
+struct fraction modmicrotone[7]; /* [SS] 2014-01-06 */
 int gotkey, gotclef;
 int octave, transpose, gotoctave, gottranspose;
+int explict;
 char* clefname;
 {
+  int minor;
+  minor =0;
+  if (modeindex >0 && modeindex <4) minor = 1;
   if ((dotune) && gotkey) {
     if (pastheader) {
-      setmap(sharps, v->basemap, v->basemul);
-      altermap(v, modmap, modmul);
+      if (!explict) setmap(sharps, v->basemap, v->basemul); /* [SS] 2010-05-08*/
+      altermap(v, modmap, modmul,modmicrotone);
       copymap(v);
       addfeature(KEY, sharps, 0, minor);
       if (gottranspose) {
@@ -2894,67 +5532,225 @@ char* clefname;
       };
     } else {
       if (gottranspose) {
-        global_transpose = transpose;
+        addfeature(GTRANSPOSE, transpose, 0, 0);
       };
-      setmap(sharps, global.basemap, global.basemul);
-      altermap(&global, modmap, modmul);
+      if (!explict) setmap(sharps, global.basemap, global.basemul); /* [SS] 2010-05-08 */
+      altermap(&global, modmap, modmul,modmicrotone);
+      global.keyset=1;
       copymap(&global);
       sf = sharps;
       mi = minor;
       headerprocess();
-      v = newvoice(1);
-      head = v;
+
+      v = getvoicecontext(1);
+      if (!inbody) v1index = notes; /* save position in case of split voice */
     };
     if (gotoctave) {
-      event_octave(octave);
+      event_octave(octave,0);
     };
   };
 }
 
+
+
+/* Handling missing repeats in multivoiced and multipart abc tune */
+
+
+int voicestart[64];
+int bar_rep_found[64];
+int add_leftrepeat_at[100];
+int num2add;
+
+void add_missing_repeats (); 
+
+void clear_voice_repeat_arrays () {
+int i;
+for (i=0;i<64;i++) {
+   voicestart[i] = 0;
+   bar_rep_found[i] = 0;
+   }
+}
+  
+
+
+void scan_for_missing_repeats ()
+{
+/* The function attempts to clean up the missing left repeats |:
+ * that occur in many multivoiced or multipart abc tunes.
+ * The function scans the feature[] representation and
+ * keeps track where the voice appears for the first time
+ * in an individual part. If a :| appears in that voice,
+ * but no |: was detected, then the function inserts a |:
+ * at the point where the voice first appears.
+ */
+int i,j;
+int voicenum;
+char part;
+num2add = 0; /* 2010-02-06 */
+part = '0';
+voicenum = 0;
+clear_voice_repeat_arrays(); /* [SS] 2012-03-22 */
+/* set voicestart[0] in case there are no voices or parts */
+for (i=0;i<notes;i++) {
+  j = feature[i];
+  if (j == MUSICLINE) {
+     insertfeature(DOUBLE_BAR,0,0,0,i+1);
+     voicestart[0] = i+1;
+     break;
+     }
+  }
+for (i=0;i<notes;i++) {
+  j = feature[i];
+  if (j == PART && parts != -1) /* [SS] 2013-03-14 */
+                 {clear_voice_repeat_arrays();
+                  part = (char) pitch[i];
+                  voicestart[0] = i;
+                 }
+  if (j == VOICE) {
+        voicenum = pitch[i];
+        if(!voicestart[voicenum]) voicestart[voicenum] = i;
+        }
+  if (j == BAR_REP) bar_rep_found[voicenum] = 1;
+  if ((j == REP_BAR || j == DOUBLE_REP) && (!bar_rep_found[voicenum])) {
+    /* printf("missing BAR_REP for voice inserted for voice %d part %c\n",voicenum,part); [SS] 2011-04-19 */
+     /*** add_leftrepeat_at[num2add] = voicestart[voicenum]+3; [SS] 2009-12-20*/
+     /***add_leftrepeat_at[num2add] = voicestart[voicenum]+2; /* [SS] 2009-12-20*/
+     add_leftrepeat_at[num2add] = voicestart[voicenum]+1; /* [SS] 2014-10-31*/
+     num2add++;
+     bar_rep_found[voicenum] = 1;
+     }
+  }
+if (num2add > 0) 
+ add_missing_repeats (); 
+if (verbose >3) printf("scan_for_missing_repeats finished\n");
+}
+
+
+void add_missing_repeats () {
+int i,j;
+for (i = num2add-1; i >= 0; i--) {
+ insertfeature(BAR_REP,0,0,0,add_leftrepeat_at[i]); 
+ /*for (j=0;j<parts;j++) {*/
+ /* for (j=0;j<=parts;j++) {   [SS] 2011-06-06 */
+ for (j=0;j<26;j++) {  /* [SS] 2011-08-03 */
+   if (part_start[j] > add_leftrepeat_at[i])
+     part_start[j]++;
+     }
+  }
+}
+
+/* [SS] 2012-11-23 */
+void convert_tnote_to_note (int loc) {
+/* tied notes TNOTE are handled in a different
+   manner by genmidi so we need to change it
+   to NOTE so it expand_ornament can process
+   it. We change TNOTE to NOTE and eliminate the
+   RESTS associated with TNOTE
+*/
+int i,j,pitchflag;
+feature[loc] = NOTE;
+/* Look ahead and remove the REST associated with TNOTE    */
+/* The last REST in the TNOTE sequence has a nonzero pitch */
+j=loc;
+for (i=0;i<6;i++) {
+  if(feature[j] == REST) {
+    pitchflag = pitch[j];
+    removefeature(j);
+    if (pitchflag != 0) break;
+    } else j++; 
+  }
+}
+
+
+
+/* [SS] 2012-05-30  2012-11-23 */
+void expand_ornaments () {
+int i;
+struct notestruct *s;
+int notetype,deco_index;
+for (i=0;i<notes;i++) {
+  if (decotype[i] != 0 && feature[i] == TNOTE) convert_tnote_to_note(i);
+  if (decotype[i] != 0 && feature[i] == NOTE) {
+      deco_index = decotype[i];
+      s =  noteaddr[deco_index];
+      notetype = s->notetype;
+      switch (notetype) {
+         case TRILL:
+           dotrill_output(i);
+           break;
+         case ROLL:
+           doroll_output(i);
+           break;
+         default: printf("no such decoration %d\n",decotype);
+         }
+      }
+  }
+/*dump_notestruct();*/
+if (verbose> 3) printf("expand_ornaments finished\n");
+ }
+
+/* [SS] 2012-12-25 */
+void fix_part_start () 
+/* update part_start array in case things have moved around */
+{
+int i;
+int partnum;
+for (i=0;i<notes;i++) {
+  if (feature[i] == PART) {
+    /*printf("%d PART %d\n",i,pitch[i]); */
+    partnum = pitch[i]-65;
+    if (partnum >= 0 && partnum < 26) part_start[partnum] = i;
+    }
+  }
+}
+
+
 static void finishfile()
 /* end of tune has been reached - write out MIDI file */
 {
-  extern int nullputc();
+  int i;
 
+  complete_all_split_voices ();
+  /* dump_voicecontexts(); for debugging*/
+  setup_trackstructure();
   clearvoicecontexts();
+  init_drum_map();
   if (!pastheader) {
     event_error("No valid K: field found at start of tune");
   } else {
-    int i;
+    scan_for_missing_repeats();
 
     if (parts > -1) {
       addfeature(PART, ' ', 0, 0);
     };
-    if (headerpartlabel == 1) {
+    if (headerpartlabel == 1 && !silent) {
       event_error("P: field in header should go after K: field");
     };
-    if (verbose) {
+    if (verbose > 1) {
       printf("handling grace notes\n");
     };
     dograce();
-    tiefix();
+    if (barflymode) apply_bf_stress_factors (); /* [SS] 2011-08-24 */ 
+    tiefix(); /* [SS] 2014-04-03 */
     if ((parts == -1) && (voicecount == 1)) {
-      if (verbose) {
+      if (verbose > 1) {
         printf("fixing repeats\n");
       };
       fixreps();
     };
-    if ((voicesused == 0) && (!karaoke) && (gchordvoice == 0) && 
-        (drumvoice == 0)) {
-      ntracks = 1;
-    } else {
-      ntracks = voicecount + karaoke + 1;
-      if (gchordvoice != 0) {
-        gchordtrack = ntracks;
-        ntracks = ntracks + 1;
-      };
-      if (drumvoice != 0) {
-        drumtrack = ntracks;
-        ntracks = ntracks + 1;
-      };
-    };
+
+ 
+    expand_ornaments();
+
+    no_more_free_channels = 0;
+
+    if (parts >= 0) fix_part_start(); /* [SS] 2012-12-25 */
+    if (verbose > 5) dumpfeat(0,notes);
+
     if (check) {
       Mf_putc = nullputc;
+      header_time_num = time_num; /* [SS] 2010-05-21 */
+      header_time_denom = time_denom; /* [SS] 2010-05-21 */
       if (ntracks == 1) {
         writetrack(0);
       } else {
@@ -2966,9 +5762,11 @@ static void finishfile()
       if ((fp = fopen(outname, "wb")) == NULL) {
         event_fatal_error("File open failed");
       };
-      printf("writing MIDI file %s\n", outname);
+      if (!silent) printf("writing MIDI file %s\n", outname);
       Mf_putc = myputc;
       Mf_writetrack = writetrack;
+      header_time_num = time_num;
+      header_time_denom = time_denom;
       if (ntracks == 1) {
         mfwrite(0, 1, division, fp);
       } else {
@@ -2987,13 +5785,16 @@ static void finishfile()
       free(words[i]);
     };
     freevstring(&part);
+    free_notestructs(); /* [SS] 2012-06-03 */ 
   };
 }
 
 void event_blankline()
 /* blank line found in abc signifies the end of a tune */
 {
+
   if (dotune) {
+    if (!silent) print_voicecodes();
     finishfile();
     parseroff();
     dotune = 0;
@@ -3007,13 +5808,12 @@ int n;
   char numstr[23]; /* Big enough for a 64-bit int! */
   char newname[256];
 
+  started_parsing = 1;
+  bodystarted =0; /* [SS] 2011-01-01 */
   if (dotune) {
     finishfile();
     parseroff();
     dotune = 0;
-  };
-  if (verbose) {
-    printf("Reference X: %d\n", n);
   };
   if ((n == xmatch) || (xmatch == 0) || (xmatch == -1)) {
     if (xmatch == -1) {
@@ -3021,16 +5821,22 @@ int n;
     };
     parseron();
     dotune = 1;
+     
+      v = newvoice(1);
+      head = v;
+      vaddr[0] = v;
+      vaddr[v->indexno] = v;
+
     pastheader = 0;
     if (userfilename == 0) {
       if (outname != NULL) {
         free(outname);
       };
       sprintf(numstr, "%d", n);
-      if (strlen(numstr) > namelimit - 1) {
+      if ( (int) strlen(numstr) > namelimit - 1) {
         numstr[namelimit - 1] = '\0';
       };
-      if (strlen(outbase) + strlen(numstr) > namelimit) {
+      if ((int) (strlen(outbase) + strlen(numstr)) > namelimit) {
         strncpy(newname, outbase, namelimit - strlen(numstr));
         strcpy(&newname[namelimit - strlen(numstr)], numstr);
         strcpy(&newname[strlen(newname)], ".mid");
@@ -3057,11 +5863,38 @@ void event_eof()
     printf("End of File reached\n");
   };
   free(pitch);
+  free(pitchline);
+  free(bentpitch);
   free(num);
   free(denom);
   free(feature);
   free(words);
   free(outname);
   free(outbase);
+}
+
+
+int main(argc,argv)
+int argc;
+char *argv[];
+{
+  char *filename;
+  int i;
+  oldchordconvention = 0; /* for handling +..+ chords */
+
+  for (i=0;i<DECSIZE;i++) decorators_passback[i]=0;
+  for (i=0;i<64;i++) dependent_voice[i]=0;
+  event_init(argc, argv, &filename);
+  /* [SS] 2013-04-10 */
+  if (csmfilename != NULL) read_custom_stress_file(csmfilename);
+  if (argc < 2) {
+    /* printf("argc = %d\n", argc); */
+  } else {
+    init_abbreviations();
+    if (!silent) printf("%s\n",VERSION); /* [SS] 2015-07-15 */
+    parsefile(filename);
+    free_abbreviations();
+  };
+  return(0);
 }
 

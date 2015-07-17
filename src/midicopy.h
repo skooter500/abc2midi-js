@@ -1,43 +1,8 @@
-/* definitions for MIDI file parsing code */
-#include <stdio.h>
-extern int (*Mf_getc)();
-extern void (*Mf_header)();
-extern void (*Mf_trackstart)();
-extern void (*Mf_trackend)();
-extern void (*Mf_noteon)();
-extern void (*Mf_noteoff)();
-extern void (*Mf_pressure)();
-extern void (*Mf_parameter)();
-extern void (*Mf_pitchbend)();
-extern void (*Mf_program)();
-extern void (*Mf_chanpressure)();
-extern void (*Mf_sysex)();
-extern void (*Mf_metamisc)();
-extern void (*Mf_seqspecific)();
-extern void (*Mf_seqnum)();
-extern void (*Mf_text)();
-extern void (*Mf_eot)();
-extern void (*Mf_timesig)();
-extern void (*Mf_smpte)();
-extern void (*Mf_tempo)();
-extern void (*Mf_keysig)();
-extern void (*Mf_arbitrary)();
-extern void (*Mf_error)();
-extern long Mf_currtime;
-extern int Mf_nomerge;
-
 /* definitions for MIDI file writing code */
-extern int (*Mf_putc)();
-extern long (*Mf_writetrack)();
-extern int (*Mf_writetempotrack)();
 float mf_ticks2sec();
 long mf_sec2ticks();
 void mfwrite();
 void mfread();
-int mf_write_meta_event();
-int mf_write_midi_event();
-void mf_write_tempo();
-void mferror();
 
 /* MIDI status commands most significant bit is 1 */
 #define note_off         	0x80

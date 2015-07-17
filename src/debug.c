@@ -6,40 +6,15 @@
 #include "abc.h"
 #include "structs.h"
 
-static int showline(v)
-struct voice* v;
-/* draws one line of music from specified voice */
+void showfeature(struct feature *ft)
 {
-  struct feature* ft;
-  struct note* anote;
-  struct key* akey;
   char* astring;
   struct fract* afract;
+  struct key* akey;
   struct rest* arest;
   struct tuple* atuple;
-  int sharps;
-  struct chord* thischord;
-  int chordcount;
+  struct note* anote;
   struct aclef* theclef;
-  int printedline;
-  int ingrace;
-
-  if (v->place == NULL) {
-    return(0);
-  };
-  ingrace = 0;
-  chordcount = 0;
-  v->beamed_tuple_pending = 0;
-  thischord = NULL;
-  if (v->keysig == NULL) {
-    event_error("Voice has no key signature");
-  } else {
-    sharps = v->keysig->sharps;
-  };
-  ft = v->place;
-  printedline = 0;
-  while ((ft != NULL) && (!printedline)) {
-    /* printf("type = %d\n", ft->type); */
     switch (ft->type) {
     case SINGLE_BAR:  printf("SINGLE_BAR\n");
       break;
@@ -102,11 +77,17 @@ struct voice* v;
           astring = nextitem(anote->syllables);
         };
       };
-      printf("stemup=%d beaming=%d x=%.1f left=%.1f right=%.1f\n", 
-              anote->stemup, anote->beaming, ft->x, ft->xleft, ft->xright);
+      printf("stemup=%d beaming=%d base =%d base_exp=%d  x=%.1f left=%.1f right=%.1f\n", 
+              anote->stemup, anote->beaming, anote->base,  anote->base_exp,
+              ft->x, ft->xleft, ft->xright);
       break;
-    case CHORDNOTE: printf("CHORDNOTE\n");
+    case CHORDNOTE: 
       anote = ft->item;
+      printf("CHORDNOTE %c%c %d / %d\n", anote->accidental, anote->pitch,
+               anote->len.num, anote->len.denom);
+      printf("stemup=%d beaming=%d base =%d base_exp=%d x=%.1f left=%.1f right=%.1f\n", 
+              anote->stemup, anote->beaming, anote->base, anote->base_exp,
+              ft->x, ft->xleft, ft->xright);
       printf("x=%.1f\n", ft->x);
       break;
     case NONOTE: printf("NONOTE\n");
@@ -181,10 +162,50 @@ struct voice* v;
     case CLEF: printf("CLEF\n");
       theclef = ft->item;
       break;
+    case SPLITVOICE: printf("SPLITVOICE\n");
     default:
       printf("unknown type: %d\n", (int)ft->type);
       break;
     };
+}
+
+
+static int showline(v)
+struct voice* v;
+/* draws one line of music from specified voice */
+{
+  struct feature* ft;
+/*  struct note* anote;
+  struct key* akey;
+  char* astring;
+  struct fract* afract;
+  struct rest* arest;
+  struct tuple* atuple;
+  struct aclef* theclef;
+*/
+  int sharps;
+  struct chord* thischord;
+  int chordcount;
+  int printedline;
+  int ingrace;
+
+  if (v->place == NULL) {
+    return(0);
+  };
+  ingrace = 0;
+  chordcount = 0;
+  v->beamed_tuple_pending = 0;
+  thischord = NULL;
+  if (v->keysig == NULL) {
+    event_error("Voice has no key signature");
+  } else {
+    sharps = v->keysig->sharps;
+  };
+  ft = v->place;
+  printedline = 0;
+  while ((ft != NULL) && (!printedline)) {
+    /* printf("type = %d\n", ft->type); */
+    showfeature(ft);
     ft = ft->next;
   };
   v->place = ft;
@@ -197,7 +218,6 @@ void showtune(struct tune* t)
   char* atitle;
   int notesdone;
   struct voice* thisvoice;
-  int doneline;
 
   notesdone = 0;
   atitle = firstitem(&t->title);

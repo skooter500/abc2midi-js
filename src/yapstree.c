@@ -15,17 +15,24 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
  *
  */
 
 /* yapstree.c - back-end for abc parser. */
 /* generates a data structure suitable for typeset music */
 
+#define VERSION "1.62 May 13 2015 yaps"
 #include <stdio.h>
 #ifdef USE_INDEX
 #define strchr index
 #endif
+
+/* for Microsoft VC 6++ or higher */
+#ifdef _MSC_VER
+#define ANSILIBS
+#endif
+
 #ifdef ANSILIBS
 #include <ctype.h>
 #include <stdlib.h>
@@ -45,6 +52,9 @@ extern void setup_fonts();
 extern void printtune(struct tune *t);
 extern void set_keysig(struct key *k, struct key *newval);
 
+programname fileprogram = YAPS;
+extern int oldchordconvention; /* for handling +..+ chords */
+
 struct voice* cv;
 struct tune thetune;
 
@@ -62,10 +72,16 @@ int pagenumbering;
 int separate_voices;
 int print_xref;
 int landscape;
+int barnums,nnbars;
 extern int gchords_above;
+extern int decorators_passback[DECSIZE]; /* a kludge for passing
+information from the event_handle_instruction to parsenote
+in parseabc.c */
 
 enum linestattype {fresh, midmusic, endmusicline, postfield};
 enum linestattype linestat;
+ 
+int dummydecorator[DECSIZE]; /* used in event_chord */
 
 void setfract(f, a, b)
 struct fract* f;
@@ -369,7 +385,7 @@ static void closegracebeam(struct voice* v)
 }
 
 static void insertnote(struct feature* chordplace, struct feature* newfeature)
-/* place NOTE in pitch order within chord */
+/* place NOTE in decreasing pitch order within chord */
 {
   struct note* n;
   struct note* newnote;
@@ -381,6 +397,7 @@ static void insertnote(struct feature* chordplace, struct feature* newfeature)
   previous = chordplace;
   f = chordplace->next;
   foundplace = 0;
+  n = NULL;
   while ((f != NULL)&&(f->type==NOTE)&&(foundplace == 0)) {
     n = f->item;
     if (newnote->y > n->y) {
@@ -390,6 +407,19 @@ static void insertnote(struct feature* chordplace, struct feature* newfeature)
       f = f->next;
     };
   };
+  /* printvoiceline in drawtune.c expects the gchord or
+   * instructions to be associated with the first note in
+   * chord. If the notes are reordered then we need
+   * to move these fields.
+   * if previous == chordplace then move n->gchords and
+   * n->instructions to newnote->gchords and newnote->instructions
+   */
+  if (previous == chordplace && n != NULL) {
+	  newnote->gchords = n->gchords;
+	  newnote->instructions = n->instructions;
+	  n->gchords = NULL;
+	  n->instructions = NULL;
+  }
   newfeature->next = previous->next;
   previous->next = newfeature;
   if (newfeature->next == NULL) {
@@ -553,6 +583,8 @@ static int notenum(int octave, char ch, enum cleftype clef, int clefoctave)
     break;
   case bass:
     n = n + 12;
+    break;
+  case noclef:
     break;
   };
   switch (clefoctave) {
@@ -733,6 +765,17 @@ int n, m;
   reducef(f);
 }
 
+static void addfractions(f,n,m)
+struct fract* f;
+int n,m;
+{
+  f->num = n*f->denom + f->num*m;
+  f->denom = m*f->denom;
+  reducef(f);
+}
+
+
+
 static struct voice* newvoice(int n)
 /* create and set up a new voice data structure */
 {
@@ -870,7 +913,6 @@ static void freefeature(void* item, featuretype type)
 {
   struct note *n;
   struct rest *r;
-  struct atempo *t;
 
   switch(type) {
   case NOTE:
@@ -1046,7 +1088,13 @@ char** filename;
   int filearg;
   int refmatch;
   int papsize, margins, newscale;
+  int ier;
+  int j;
 
+  if (getarg("-ver",argc, argv) != -1) {
+	  printf("%s\n",VERSION);
+	  exit(0);
+  }
   if (getarg("-d", argc, argv) != -1) {
     debugging = 1;
   } else {
@@ -1057,6 +1105,7 @@ char** filename;
   } else {
     eps_out = 0;
   };
+  if (getarg("-OCC",argc,argv) != -1) oldchordconvention=1;
   if (getarg("-V", argc, argv) != -1) {
     separate_voices = 1;
   } else {
@@ -1078,7 +1127,7 @@ char** filename;
     landscape = 0;
   };
   newscale = getarg("-s", argc, argv);
-  if ((newscale != -1) && (argc >= newscale)) {
+  if ((newscale != -1) && (argc >= newscale+1)) {  /* [SS] 2015-02-22 */
     setscaling(argv[newscale]);
   } else {
     setscaling("");
@@ -1095,6 +1144,11 @@ char** filename;
   } else {
     setpagesize("");
   };
+  barnums = getarg("-k",argc,argv);
+  ier = 0;
+  if ((barnums != -1) && (argc > barnums)) ier = sscanf(argv[barnums],"%d",&nnbars);
+  if ((barnums != -1) && (ier <1)) nnbars = 1;
+
   refmatch = getarg("-e", argc, argv);
   if (refmatch == -1) {
     *matchstring = '\0';
@@ -1107,9 +1161,10 @@ char** filename;
     };
   };
   if ((getarg("-h", argc, argv) != -1) || (argc < 2)) {
-    printf("yaps version 1.12\n");
+    printf("yaps version %s\n",VERSION);
     printf("Usage:  yaps <abc file> [<options>]\n");
     printf("  possible options are -\n");
+    printf("  -ver          :prints version number and exits\n");
     printf("  -d            : debug - display data structure\n");
     printf("  -e <list>     : draw tunes with reference numbers in list\n");
     printf("     list is comma-separated and may contain ranges\n");
@@ -1119,12 +1174,14 @@ char** filename;
     printf("  -M XXXxYYY    : set margin sizes in points\n");
     printf("     28.3 points = 1cm, 72 points = 1 inch\n");
     printf("  -N            : add page numbering\n");
+    printf("  -k [nn]       : number every nn bars\n");
     printf("  -o <filename> : specify output file\n");
     printf("  -P ss         : paper size; 0 is A4, 1 is US Letter\n");
     printf("     or XXXxYYY to set size in points\n");
     printf("  -s XX         : scaling factor (default is 0.7)\n");
     printf("  -V            : separate voices in multi-voice tune\n");
     printf("  -x            : print tune number in X: field\n");
+    printf("  -OCC          : old chord convention (eg. +CE+)\n");
     printf("Takes an abc music file and converts it to PostScript.\n");
     printf("If no output filename is given, then by default it is\n");
     printf("the input filename but with extension .ps .\n");
@@ -1135,9 +1192,11 @@ char** filename;
   fileopen = 0;
   filearg = getarg("-o", argc, argv);
   if (filearg != -1) { 
-    strcpy(outputname, argv[filearg]);
+    /*strcpy(outputname, argv[filearg]); security risk buffer overflow */
+    strncpy(outputname, argv[filearg],256);
   } else {
-    strcpy(outputname, argv[1]);
+    /* strcpy(outputname, argv[1]); security risk: buffer overflow */
+    strncpy(outputname, argv[1],256);
     place = strchr(outputname, '.');
     if (place == NULL) {
       strcat(outputname, ".ps");
@@ -1161,6 +1220,7 @@ char** filename;
   init_tune(&thetune, -1);
   setup_fonts();
   /* open_output_file(outputname); */
+  for (j=0;j<DECSIZE;j++)  dummydecorator[j] = 0;
 }
 
 static void check_voice_end(struct voice* v)
@@ -1253,6 +1313,30 @@ char symbol;
 char *string;
 char container;
 {
+}
+
+void event_acciaccatura()
+{
+/* does nothing but outputs a / in toabc.c */
+return;
+}
+
+/* [SS] 2015-03-23 */
+void event_start_extended_overlay()
+{
+event_error("extended overlay not implemented in yaps");
+}
+
+void event_stop_extended_overlay()
+{
+event_error("extended overlay not implemented in yaps");
+}
+
+
+void event_split_voice()
+{
+addfeature(SPLITVOICE, (void*) lineno);
+event_error("voice split not implemented in yaps");
 }
 
 void event_tex(s)
@@ -1653,11 +1737,18 @@ int continuation;
   freevstring(&syll);
 }
 
+/* [SS] 2014-08-16 */
+void appendfield (morewords)
+char *morewords;
+{
+printf("appendfield not implemented here\n");
+}
+
 void event_part(s)
 char* s;
 /* A part field (P: ) has been encountered in the abc */
 {
-  char label[20];
+  char label[200]; /* [SS] 2010-12-12 */
 
   if (xinhead) {
     if (thetune.parts != NULL) {
@@ -1677,9 +1768,10 @@ char* s;
   };
 }
 
-void event_voice(n, s)
+void event_voice(n, s, vp)
 int n;
 char *s;
+struct voice_params *vp;
 /* A voice field (V: ) has been encountered */
 {
   if (xinbody) {
@@ -1949,9 +2041,11 @@ static void start_body()
   if (thetune.unitlen.num == 0) {
     event_warning("no L: field, using default rule");
     if ((double) thetune.meter.num / (double) thetune.meter.denom < 0.75) {
-      setfract(&thetune.unitlen, 1, 16);
+      /*setfract(&thetune.unitlen, 1, 16); [SS] 2004-09-06 */
+      event_length(16);
     } else {
-      setfract(&thetune.unitlen, 1, 8);
+     /* setfract(&thetune.unitlen, 1, 8); */
+      event_length(8);
     };
   };
   if (thetune.tempo != NULL) {
@@ -1959,10 +2053,10 @@ static void start_body()
   };
 }
 
-void event_true_key(sharps, s, minor, modmap, modmul)
+void event_true_key(sharps, s, modeindex, modmap, modmul)
 int sharps;
 char *s;
-int minor;
+int modeindex; /* 0 major, 1,2,3 minor, 4 locrian, etc.  */
 char modmap[7];
 int modmul[7];
 /* key detected in K: field */
@@ -1970,6 +2064,9 @@ int modmul[7];
   char basemap[7];
   int basemul[7];
   struct key* akey;
+  int minor;
+  minor =0;
+  if (modeindex >0 && modeindex <4) minor = 1;
 
   setmap(sharps, basemap, basemul);
   altermap(basemap, basemul, modmap, modmul);
@@ -1986,12 +2083,12 @@ int modmul[7];
     };
     xinbody = 1;
     xinhead = 0;
-    start_body();
     setvoice(1);
+    start_body();
   };
 }
 
-void event_octave(int num)
+void event_octave(int num, int local)
 /* deals with the special command I:octave=N */
 {
   if (xinhead) {
@@ -2002,16 +2099,18 @@ void event_octave(int num)
   };
 }
 
-void event_key(sharps, s, minor, modmap, modmul, gotkey, gotclef, clefstr,
-          octave, transpose, gotoctave, gottranspose)
+void event_key(sharps, s, minor, modmap, modmul, modmicrotone, gotkey, gotclef, clefstr,
+          octave, transpose, gotoctave, gottranspose, explict)
 int sharps;
 char *s;
 int minor;
 char modmap[7];
 int modmul[7];
+struct fraction modmicrotone[7]; /* [SS] 2014-01-06 */
 int gotkey, gotclef;
 char* clefstr;
 int octave, transpose, gotoctave, gottranspose;
+int explict;
 /* A key field (K: ) has been encountered */
 {
   if (xinhead || xinbody) {
@@ -2023,7 +2122,7 @@ int octave, transpose, gotoctave, gottranspose;
     };
   };
   if (gotoctave) {
-    event_octave(octave);
+    event_octave(octave,0);
   };
 }
 
@@ -2073,7 +2172,8 @@ char* playonrep_list;
     event_warning("Bar line not permitted within chord");
     return;
   };
-  addfeature(type, NULL);
+  checkbar(type); /* increment bar number if bar complete */
+  addfeature(type, (void*)cv->barno); /* save bar number */
   switch(type) {
   case SINGLE_BAR:
     break;
@@ -2113,7 +2213,6 @@ char* playonrep_list;
     cv->expect_repeat = 1;
     break;
   };
-  checkbar(type);
   if ((playonrep_list != NULL) && (strlen(playonrep_list) > 0)) {
     event_playonrep(playonrep_list);
   };
@@ -2249,7 +2348,10 @@ char* s;
     cv->gchords_pending = newlist();
   };
   if (*s == '_') {
-    addtolist(cv->instructions_pending, addstring(s+1));
+  if (cv->instructions_pending == NULL) {
+    cv->instructions_pending = newlist();
+    };
+  addtolist(cv->instructions_pending, addstring(s+1));
   } else {
     addtolist(cv->gchords_pending, addstring(s));
   };
@@ -2262,18 +2364,53 @@ char* s;
   char* inst;
   static char segno[3] = ":s";
   static char coda[3] = ":c";
+  struct dynamic *psaction;
+  int done;
  
+  done = 0;
   inst = s;
+  if (strcmp(s, "fermata") == 0)
+     {
+     decorators_passback[4] =1;
+/*   don't show !fermata!. Treat it like H in music line */
+     return;
+     }
+
+  if (strcmp(s, "trill") == 0)
+     {
+     decorators_passback[6] =1;
+/*   don't show !trill!. Treat it like T in music line */
+     return;
+     }
+
   if (strcmp(s, "segno") == 0) {
     inst = segno;
+    done = 1;
   };
   if (strcmp(s, "coda") == 0) {
     inst = coda;
+    done = 1;
   };
-  if (cv->instructions_pending == NULL) {
-    cv->instructions_pending = newlist();
-  };
-  addtolist(cv->instructions_pending, addstring(inst));
+
+  if (done == 1) {
+    if (cv->instructions_pending == NULL) {
+      cv->instructions_pending = newlist();
+     };
+    addtolist(cv->instructions_pending, addstring(inst));
+    return;
+    }
+  if (strcmp(s,"red") == 0)
+   {     
+   psaction = (struct dynamic*) checkmalloc(sizeof(struct note));
+   psaction->color = 'r';
+   addfeature(DYNAMIC,psaction);
+   }
+  if (strcmp(s,"black") == 0)
+   {     
+   psaction = (struct dynamic*) checkmalloc(sizeof(struct note));
+   psaction->color = 'b';
+   addfeature(DYNAMIC,psaction);
+   }
 }
 
 struct slurtie* resolve_slur(struct feature* lastnote)
@@ -2597,14 +2734,15 @@ void event_chord()
 /* handles old '+' notation which marks the start and end of each chord */
 {
     if (cv->inchord) {
-      event_chordoff();
+      event_chordoff(1,1);
     } else {
-      event_chordon();
+      event_chordon(dummydecorator);
     };
 }
 
-void event_chordon()
+void event_chordon(int chorddecorators[])
 /* start of a chord */
+/* the array chorddecorators is not used yet. */
 {
   if (cv->inchord) {
     event_error("nested chords found");
@@ -2616,12 +2754,43 @@ void event_chordon()
   cv->chordplace = addfeature(CHORDON, cv->thischord);
 }
 
-void event_chordoff()
+
+void fix_enclosed_note_lengths(struct feature* chordplace,
+      int chord_n, int chord_m, int * base, int * base_exp)
+{
+struct feature* f;
+struct note* anote;
+if (chord_n ==1 && chord_m ==1) return;
+f = chordplace->next;
+anote = f->item;
+/* remove old note length from barcount */
+addfractions(&cv->barcount, -anote->len.num, anote->len.denom);
+while ((f != NULL)&&((f->type==NOTE)||(f->type=CHORDNOTE))) {
+   anote = f->item;
+   /* remove old note length from barcount */
+   setfract(&anote->len, chord_n*cv->unitlen.num, chord_m*cv->unitlen.denom);
+   reducef(&anote->len);
+   /*printf("NOTE %c%c %d / %d\n", anote->accidental, anote->pitch, 
+               anote->len.num, anote->len.denom);                 
+   */
+   anote->dots = count_dots(&anote->base, &anote->base_exp,
+         anote->len.num, anote->len.denom);
+   f = f->next;
+   *base = anote->base;
+   *base_exp = anote->base_exp;
+   }
+   /* and new note length to barcount */
+   addfractions(&cv->barcount, anote->len.num, anote->len.denom);
+}
+
+
+void event_chordoff(int chord_n, int chord_m)
 /* end of a chord */
 {
   struct feature* ft;
   struct chord* thechord;
   struct note* firstnote;
+  int base,base_exp;
 
   if (!cv->inchord) {
     event_error("no chord to close");
@@ -2639,11 +2808,25 @@ void event_chordoff()
   } else {
     event_error("mis-formed chord");
   };
+  
+  if (cv->chordplace) {
+      fix_enclosed_note_lengths(cv->chordplace,chord_n,chord_m,&base,&base_exp);
+      if (chord_n != 1 || chord_m != 1) {
+         thechord->base = base;
+         thechord->base_exp = base_exp;
+         }
+      }
   cv->inchord = 0;
   cv->thischord = NULL;
   cv->chordplace = NULL;
   advance_ties();
   addfeature(CHORDOFF, NULL);
+}
+
+/* just a stub to ignore 'y' */
+void event_spacing(n, m)
+int n,m;
+{
 }
 
 void xevent_rest(n, m, multi)
@@ -2693,8 +2876,9 @@ int n, m, multi;
   };
 }
 
-void event_rest(n,m)
-int n, m;
+void event_rest(decorators,n,m,type)
+int n, m,type;
+int decorators[DECSIZE];
 /* A rest has been encountered in the abc */
 {
   xevent_rest(n, m, 0);
@@ -2721,6 +2905,7 @@ int xoctave, n, m;
 
   nt = newnote(decorators, xaccidental, xmult, xnote, xoctave+cv->octaveshift, 
                n * cv->unitlen.num, m * cv->unitlen.denom);
+  nt->tuplenotes = cv->tuplenotes;
   noteplace = addfeature(NOTE, nt);
   cv->lastnote = noteplace;
   resolve_ties(noteplace);
@@ -2766,6 +2951,17 @@ int xoctave, n, m;
   };
 }
 
+/* these functions are here to satisfy the linker */
+void event_microtone(int dir, int a, int b)
+{
+}
+
+void event_normal_tone()
+{
+}
+
+
+
 void event_info_key(key, value)
 char* key;
 char* value;
@@ -2778,7 +2974,29 @@ char* value;
   };
   if (strcmp(key, "octave")==0) {
     num = readsnumf(value);
-    event_octave(num);
+    event_octave(num,0);
   };
+}
+
+
+int main(argc,argv)
+int argc;
+char *argv[];
+{
+  char *filename;
+  int i;
+
+  oldchordconvention = 0;
+  for (i=0;i<DECSIZE;i++) decorators_passback[i]=0;
+
+  event_init(argc, argv, &filename);
+  if (argc < 2) {
+    /* printf("argc = %d\n", argc); */
+  } else {
+    init_abbreviations();
+    parsefile(filename);
+    free_abbreviations();
+  };
+  return(0);
 }
 

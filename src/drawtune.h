@@ -1,12 +1,14 @@
 /* drawtune.h - part of yaps */
 /* this file declares the routines in drawtune.c that are used elsewhere */
 
+/* for Microsoft Visual C++ version 6.0 or higher */
+
 extern int eps_out;
 /* bounding box for encapsulated PostScript */
 struct bbox {
   int llx, lly, urx, ury;
 };
-#if ANSILIBS
+#ifdef ANSILIBS
 extern void setmargins(char* s);
 extern void setpagesize(char* s);
 extern void open_output_file(char* filename, struct bbox* boundingbox);

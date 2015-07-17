@@ -1,5 +1,5 @@
 /*
- * midifile 1.11
+ * midifile 1.15
  * 
  * Read and write a MIDI file.  Externally-assigned function pointers are 
  * called upon recognizing things in the file.
@@ -41,15 +41,28 @@
  * 17 Jan 1999 added 0.5 in mf_sec2ticks to avoid rounding errors.
  * 15 Mar 1999 added some fixes suggested by Seymour Shlien to solve
  * portability problems caused by expression evaluation order.
+ *
+ *
+ * Changes by Seymour Shlien
+ *
+ * 1 Jan 2000 Mf_toberead is no longer static, (to link with mftext2.c)
+ *
+ * 5 Mar 2000
+ * ntrks is a global variable (number of tracks in midi file)
+ * mfread now keeps track of number of tracks read and stops when
+ * it reads ntrks. (To solve expecting MTrk error for some midi files).
+ *
+ * 29 Jan 2006 
+ * introduced some support for some universal system exclusive
+ * messages (in particular single note tuning change).
+ * reference http://www.midi.org/about-midi/tuning.shtml
  */
- 
-#define ANSILIBS
-#include <stdlib.h> 
 #include "midifile.h"
 #define NULLFUNC 0
-#define NULL 0
+/*#define NULL 0 */
 
 #include <stdio.h>
+#include <stdlib.h>
 #ifdef ANSILIBS
 #include <string.h>
 #include <stdlib.h>
@@ -63,28 +76,28 @@ char *strcpy(), *strcat();
 
 /* Functions to be called while processing the MIDI file. */
 int (*Mf_getc)() = NULLFUNC;
-int (*Mf_error)() = NULLFUNC;
-int (*Mf_header)() = NULLFUNC;
-int (*Mf_trackstart)() = NULLFUNC;
-int (*Mf_trackend)() = NULLFUNC;
-int (*Mf_noteon)() = NULLFUNC;
-int (*Mf_noteoff)() = NULLFUNC;
-int (*Mf_pressure)() = NULLFUNC;
-int (*Mf_parameter)() = NULLFUNC;
-int (*Mf_pitchbend)() = NULLFUNC;
-int (*Mf_program)() = NULLFUNC;
-int (*Mf_chanpressure)() = NULLFUNC;
-int (*Mf_sysex)() = NULLFUNC;
-int (*Mf_arbitrary)() = NULLFUNC;
-int (*Mf_metamisc)() = NULLFUNC;
-int (*Mf_seqnum)() = NULLFUNC;
-int (*Mf_eot)() = NULLFUNC;
-int (*Mf_smpte)() = NULLFUNC;
-int (*Mf_tempo)() = NULLFUNC;
-int (*Mf_timesig)() = NULLFUNC;
-int (*Mf_keysig)() = NULLFUNC;
-int (*Mf_seqspecific)() = NULLFUNC;
-int (*Mf_text)() = NULLFUNC;
+void (*Mf_error)() = NULLFUNC;
+void (*Mf_header)() = NULLFUNC;
+void (*Mf_trackstart)() = NULLFUNC;
+void (*Mf_trackend)() = NULLFUNC;
+void (*Mf_noteon)() = NULLFUNC;
+void (*Mf_noteoff)() = NULLFUNC;
+void (*Mf_pressure)() = NULLFUNC;
+void (*Mf_parameter)() = NULLFUNC;
+void (*Mf_pitchbend)() = NULLFUNC;
+void (*Mf_program)() = NULLFUNC;
+void (*Mf_chanpressure)() = NULLFUNC;
+void (*Mf_sysex)() = NULLFUNC;
+void (*Mf_arbitrary)() = NULLFUNC;
+void (*Mf_metamisc)() = NULLFUNC;
+void (*Mf_seqnum)() = NULLFUNC;
+void (*Mf_eot)() = NULLFUNC;
+void (*Mf_smpte)() = NULLFUNC;
+void (*Mf_tempo)() = NULLFUNC;
+void (*Mf_timesig)() = NULLFUNC;
+void (*Mf_keysig)() = NULLFUNC;
+void (*Mf_seqspecific)() = NULLFUNC;
+void (*Mf_text)() = NULLFUNC;
 
 /* Functions to implement in order to write a MIDI file */
 int (*Mf_putc)() = NULLFUNC;
@@ -96,7 +109,9 @@ int Mf_nomerge = 0;    /* 1 => continue'ed system exclusives are */
 long Mf_currtime = 0L;    /* current time in delta-time units */
 
 /* private stuff */
-static long Mf_toberead = 0L;
+long Mf_toberead = 0L;
+long Mf_bytesread = 0L;
+
 static long Mf_numbyteswritten = 0L;
 
 static long readvarinum();
@@ -105,36 +120,70 @@ static long to32bit();
 static int read16bit();
 static int to16bit();
 static char *msg();
-/* following declaration added 27/8/96 JRA */
-static void readheader();
+int skiptrack ();
+
+/* this block was previously in midifile.h [SS] 2010-01-23*/
 static int readtrack();
+static void readheader();
 static void badbyte();
 static void metaevent();
 static void sysex();
 static void chanmessage();
 static void msginit();
-static int msgleng();
 static void msgadd();
 static void biggermsg();
-static int eputc();
 static void mf_write_track_chunk();
 static void mf_write_header_chunk();
-static void write16bit(),write32bit();
 static void WriteVarLen();
-static void mferror();
+static void write32bit();
+static void write16bit();
+static int msgleng();
+static int eputc();
+/* end of block */
+
+
+/* following declaration added 27/8/96 JRA 
+static readheader(), readtrack(), badbyte(), metaevent(), sysex(),
+       chanmessage(), msginit(), msgleng(), msgadd(), biggermsg();
+*/
+int ntrks;
 
 void mfread()     /* The only non-static function in this file. */
 {
+  int track;
   if ( Mf_getc == NULLFUNC )
     mferror("mfread() called without setting Mf_getc"); 
 
   readheader();
-  while ( readtrack() )
-    ;
+  track =1;
+  while (readtrack()) 
+    {track++;
+     if(track>ntrks) break;
+    }
 }
 
+
+void mfreadtrk(itrack)     /* The only non-static function in this file. */
+{
+  int track,ok;
+  if ( Mf_getc == NULLFUNC )
+    mferror("mfprocess() called without setting Mf_getc");
+
+  readheader();
+  track =1;
+  ok = 1;
+  for (track=1;track<=ntrks && ok == 1;track++)
+   {if (track == itrack)
+     ok = readtrack();
+    else
+     ok = skiptrack();
+   }
+}
+
+
+
 /* for backward compatibility with the original lib */
-int midifile()
+void midifile()
 {
     mfread();
 }
@@ -166,18 +215,20 @@ egetc()      /* read a single character and abort on EOF */
   if ( c == EOF )
     mferror("premature EOF");
   Mf_toberead--;
+  Mf_bytesread++;
   return(c);
 }
 
 static void
 readheader()    /* read a header chunk */
 {
-  int format, ntrks, division;
+  int format, division;
 
   if ( readmt("MThd") == EOF )
     return;
 
   Mf_toberead = read32bit();
+  Mf_bytesread = 0;
   format = read16bit();
   ntrks = read16bit();
   division = read16bit();
@@ -190,7 +241,20 @@ readheader()    /* read a header chunk */
     (void) egetc();
 }
 
-static int
+int skiptrack ()
+{
+int byte;
+if ( readmt("MTrk") == EOF )
+    return(0);
+Mf_toberead = read32bit();
+byte = 0;
+while (Mf_toberead && byte != EOF) byte = egetc();
+if (byte == EOF) {mferror("premature EOF\n"); return(0);}
+return(1);
+}
+
+
+int
 readtrack()     /* read a track chunk */
 {
   /* This array is indexed by the high half of a status byte.  It's */
@@ -205,14 +269,17 @@ readtrack()     /* read a track chunk */
   int sysexcontinue = 0;  /* 1 if last message was an unfinished sysex */
   int running = 0;  /* 1 when running status used */
   int status = 0;    /* status value (e.g. 0x90==note-on) */
+  int laststatus;   /* for running status */
   int needed;
   long varinum;
 
+  laststatus = 0;
   if ( readmt("MTrk") == EOF )
     return(0);
 
   Mf_toberead = read32bit();
   Mf_currtime = 0;
+  Mf_bytesread =0;
 
   if ( Mf_trackstart )
     (*Mf_trackstart)();
@@ -226,25 +293,36 @@ readtrack()     /* read a track chunk */
     if ( sysexcontinue && c != 0xf7 )
       mferror("didn't find expected continuation of a sysex");
 
+/* if bit 7 not set, there is no status byte following the
+*  delta time, so it must a running status and we assume the
+*  last status occuring in the preceding channel message.   */
     if ( (c & 0x80) == 0 ) {   /* running status? */
       if ( status == 0 )
         mferror("unexpected running status");
       running = 1;
     }
-    else {
-      status = c;
-      running = 0;
+    else { /* [SS] 2013-09-10 */
+      if (c>>4 != 0x0f) { /* if it is not a meta event save the status*/
+       laststatus = c;
+        }
+     running = 0;
+     status = c;
     }
 
-    needed = chantype[ (status>>4) & 0xf ];
+    /* [SS] 2013-09-10 */
+    if (running) needed = chantype[ (laststatus>>4) & 0xf];
+    else needed = chantype[ (status>>4) & 0xf ];
 
     if ( needed ) {    /* ie. is it a channel message? */
 
-      if ( running )
+      if ( running ) {
         c1 = c;
-      else
+        chanmessage( laststatus, c1, (needed>1) ? egetc() : 0 );
+        }
+      else {
         c1 = egetc();
-      chanmessage( status, c1, (needed>1) ? egetc() : 0 );
+        chanmessage( status, c1, (needed>1) ? egetc() : 0 );
+       }
       continue;;
     }
 
@@ -490,8 +568,9 @@ read16bit()
   return to16bit(c1,c2);
 }
 
-static void mferror(s)
-char *s;
+/* static */
+void mferror(s)
+	char *s;
 {
   if ( Mf_error ) {
     (*Mf_error)(s);
@@ -874,17 +953,6 @@ long tempo;
     eputc((char)(0xff & tempo));
 }
 
-/* Original code is incorrect
- *
- * long 
- *mf_sec2ticks(secs,division,tempo)
- *int division;
- *long tempo;
- *float secs;
- *{    
- *     return (long)(((secs * 1000.0) / 4.0 * division) / tempo);
- *}
- */
 
 
 /* 
@@ -939,6 +1007,37 @@ long value;
   }
 }/* end of WriteVarLen */
 
+
+void single_note_tuning_change(int key, float midipitch)
+{
+unsigned char kk,xx,yy,zz;
+int number,intfraction;
+float fraction;
+eputc(0); /* varinum delta_t (time to next event) */
+eputc(0xf0); /* sysex initiation */
+ eputc(11);  /* 11 bytes included in sysex */
+eputc(127); /* universal sysex command (0x7f) */
+eputc(0);    /* device id */
+eputc(8);    /* midi tuning */
+eputc(2);    /* note change */
+eputc(0);    /* program number 0 - 127 */
+eputc(1);    /* only one change */
+kk = (unsigned char) 127 & key;
+eputc(kk);  /* MIDI key  0 - 127 */
+number = (int) midipitch;
+fraction = midipitch - (float) number;
+if (fraction < 0.0) fraction = -fraction;
+intfraction = fraction*16384;
+xx = 0x7f & number;
+yy = intfraction/128;
+zz = intfraction % 128;
+yy = 0x7f & yy;
+zz = 0x7f & zz;
+eputc(xx);
+eputc(yy);
+eputc(zz);
+eputc(247); /* 0xf7 terminates sysex command */
+}
 
 /* 
  * This routine converts delta times in ticks into seconds. The
@@ -1018,5 +1117,9 @@ char c;
   };
 #endif                        
   Mf_numbyteswritten++;
+  if(Mf_numbyteswritten > 500000) {
+     printf("eputc: aborting because of file runaway (infinite loop)\n");
+     exit(1);
+     }
   return(return_val);
 }
