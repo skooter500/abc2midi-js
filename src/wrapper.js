@@ -4,7 +4,7 @@ function downloadMidiFromAbc(abc, fileName)
 	download(midi, fileName);	
 }
 
-function abc2midi(abc)
+function abc2midi(abcContents)
 {
 	var inFile = "in.abc";
 	
