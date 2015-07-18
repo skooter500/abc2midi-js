@@ -6,7 +6,17 @@ function downloadMidiFromAbc(abc, fileName)
 
 function abc2midi(abc)
 {
-	FS.createDataFile("/", "in.abc", abcContents, true, true);
+	var inFile = "in.abc";
+	
+	try
+	{
+		FS.unlink(inFile);
+	}
+	catch(err)
+	{
+	}
+		
+	FS.createDataFile("/", inFile, abcContents, true, true);
 	var result = Module.ccall('abc2midiC', // name of C function
 	  'number', // return type
 	  [], // argument types
