@@ -4,8 +4,53 @@ function downloadMidiFromAbc(abc, fileName)
 	download(midi, fileName);	
 }
 
-function abc2midi(abcContents)
+function transcribe(signal, sampleRate, sampleTime, midi)
 {
+
+	var arrayptr = Module._malloc(signal.length*4);
+	writeFloatArray(arrayptr,signal);
+	
+	var result = Module.ccall('transcribe', // name of C function
+	  'number', // return type
+	  ['number', 'number', 'number', 'number'], // argument types
+	  [arrayptr, sampleRate, sampleTime, midi]); // arguments
+	var retstr = Pointer_stringify(result);
+	return retstr;	
+}
+
+function transcribeTest(sampleRate, sampleTime, midi)
+{
+	var result = Module.ccall('transcribeTest', // name of C function
+	  'string', // return type
+	  ['number', 'number', 'number'], // argument types
+	  [sampleRate, sampleTime, midi]); // arguments
+	return result;
+}
+
+function writeFloatArray(ptr,array) 
+{ 
+  for(i=0;i<array.length;i++) 
+  {
+    Module.setValue(ptr,array[i],'float');
+    ptr += 4;
+  } 
+}
+
+function transcribeTest1(signal, sampleRate, sampleTime, midi)
+{
+	var arrayptr = Module._malloc(signal.length*4);
+	writeFloatArray(arrayptr,signal);
+	
+	var result = Module.ccall('transcribeTest1', // name of C function
+	  'number', // return type
+	  ['number', 'number', 'number', 'number'], // argument types
+	  [arrayptr, sampleRate, sampleTime, midi]); // arguments
+	var retstr = Pointer_stringify(result);
+	return retstr;
+}
+function abc2midi(abcSource)
+{
+	console.log(abcSource);
 	var inFile = "in.abc";
 	
 	try
@@ -16,7 +61,7 @@ function abc2midi(abcContents)
 	{
 	}
 		
-	FS.createDataFile("/", inFile, abcContents, true, true);
+	FS.createDataFile("/", inFile, abcSource, true, true);
 	var result = Module.ccall('abc2midiC', // name of C function
 	  'number', // return type
 	  [], // argument types
